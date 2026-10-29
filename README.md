@@ -4,6 +4,8 @@
 
 Hệ thống điểm danh sinh viên tự động theo kiến trúc phân tầng biên - máy chủ (Decoupled Edge-Server Architecture): Thiết bị biên ESP32-CAM thu nhận và nén hình ảnh, Máy chủ FastAPI điều phối mô hình học sâu chống giả mạo **MiniFASNetV2 (ONNX)** kết hợp mạng nơ-ron tích chập **ResNet-34 (128D Embedding)**, giao diện Web Kiosk chuyên nghiệp xây dựng bằng **React + TypeScript + Tailwind CSS** và phản hồi âm thanh còi bíp tức thì qua loa máy tính (Laptop Audio HMI).
 
+> 📄 **Tài liệu thuyết trình trọng điểm:** [BAO_CAO_THUYET_TRINH.md](./BAO_CAO_THUYET_TRINH.md) — Tóm tắt công nghệ sử dụng, giải thích nguyên lý chống giả mạo vật lý và kịch bản demo 3 bước thuyết phục.
+
 ---
 
 ## 1. Thông Tin Nhóm Nghiên Cứu & Học Phần
