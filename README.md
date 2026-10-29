@@ -42,9 +42,10 @@ Hệ thống điểm danh sinh viên tự động sử dụng vi điều khiển
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │ Bản ghi xác thực thành công
 ┌───────────────────────────────────▼────────────────────────────────────┐
-│ TẦNG 4: ỨNG DỤNG KIOSK & XUẤT BÁO CÁO (APPLICATION & EXCEL PERSISTENCE)│
+│ TẦNG 4: ỨNG DỤNG KIOSK & PHẢN HỒI ÂM THANH (APPLICATION & AUDIO HMI)   │
 │ Giao diện Dashboard Kiosk một chiều (Streamlit)                        │
 │ Danh sách 36 sinh viên D23CTAT01-B + Tự động xuất Excel (.xlsx) chuẩn  │
+│ Phản hồi âm thanh còi bíp xác thực tức thì (1800Hz / 0ms delay)        │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -77,31 +78,22 @@ Hệ thống ngăn chặn 100% tấn công bằng ảnh tĩnh (Print Attack) và
 
 ```
 BTL-IoT/
-├── Bao_Cao/
-│   ├── BAO_CAO_HOAN_THIEN.md               # Báo cáo kỹ thuật chi tiết (Markdown)
-│   ├── Bao_Cao_IoT_Nhom05_D23CTAT01B.docx  # Báo cáo học thuật bản Word (.docx)
-│   ├── Bao_Cao_IoT_Nhom05_D23CTAT01B.pdf   # Báo cáo học thuật bản in PDF (24 trang)
-│   ├── Bao_Cao_Goc_Draft.docx             # Bản nháp gốc từ Google Docs
-│   └── Nghien_Cuu_Face_Anti_Spoofing_Diem_Danh.md # Tài liệu nghiên cứu chuyên sâu FAS
+├── Bao_Cao/                               # Thư mục chứa báo cáo học thuật (Word, PDF, Markdown)
+│   └── .gitkeep
 ├── DiemDanh_AI/
-│   ├── app.py                             # Mã nguồn máy chủ AI & Giao diện Kiosk
+│   ├── app.py                             # Mã nguồn máy chủ AI & Giao diện Kiosk Streamlit
 │   ├── class_roster.json                  # CSDL 36 sinh viên lớp D23CTAT01-B
 │   ├── attendance_log.csv                 # Nhật ký điểm danh thời gian thực
-│   ├── run.sh                             # Script khởi chạy nhanh Streamlit
+│   ├── beep_success.wav                   # Âm thanh còi bíp xác thực thành công (1800Hz)
+│   ├── run.sh                             # Script khởi chạy nhanh ứng dụng
 │   ├── requirements.txt                   # Danh sách thư viện Python
-│   └── faces/                             # Ảnh mẫu nhận diện đa góc nhìn
-│       ├── B23DCAT153_Nguyen_Dang_Khoa.jpg
-│       ├── B23DCAT156_Do_Trung_Kien_1.jpg
-│       ├── B23DCAT156_Do_Trung_Kien_2.jpg
-│       ├── B23DCAT156_Do_Trung_Kien_3.jpg
-│       ├── B23DCAT320_Hoang_Hoang_Tuan_1.jpg
-│       ├── B23DCAT320_Hoang_Hoang_Tuan_2.jpg
-│       └── B23DCAT320_Hoang_Hoang_Tuan_3.jpg
+│   └── faces/                             # Thư mục lưu ảnh khuôn mặt sinh viên mẫu (.jpg)
+│       └── .gitkeep
 ├── Firmware_ESP32/
-│   ├── code_esp32_cam.ino                 # Mã nguồn Arduino nạp module ESP32-CAM
-│   └── code_esp32_cam.txt                 # Bản lưu trữ văn bản mã nạp
-├── requirements.txt                       # Thư viện toàn cục
-├── .gitignore                             # Cấu hình bỏ qua tệp tạm
+│   ├── code_esp32_cam.ino                 # Mã nguồn C/C++ nạp module vi điều khiển biên
+│   └── code_esp32_cam.txt                 # Bản lưu trữ văn bản thuần mã nạp
+├── requirements.txt                       # Thư viện toàn cục cho dự án
+├── .gitignore                             # Cấu hình bỏ qua tệp tạm (__pycache__, *.pyc, *.tmp)
 └── README.md                              # Tài liệu hướng dẫn dự án
 ```
 
@@ -116,7 +108,9 @@ BTL-IoT/
    * CPU Frequency: `240MHz (WiFi/BT)`
    * Flash Frequency: `80MHz`
 3. Mở tệp `Firmware_ESP32/code_esp32_cam.ino`.
-4. Nạp code qua mạch nạp FTDI (nối GPIO0 với GND khi nạp, tháo ra sau khi nạp xong).
+4. Nạp code:
+   * **Nếu dùng đế nạp ESP32-CAM-MB:** Cắm thẳng cáp Micro-USB từ máy tính vào cổng trên đế và bấm Upload (nhấn giữ nút `IO0/BOOT` 1-2s nếu màn hình hiện `Connecting...`).
+   * **Nếu dùng mạch FTDI rời:** Nối GPIO0 với GND khi nạp, tháo ra sau khi nạp xong.
 5. Sau khi khởi động, ESP32-CAM tự phát mạng Wi-Fi:
    * SSID: `ESP32_DIEM_DANH`
    * Mật khẩu: `12345678`
