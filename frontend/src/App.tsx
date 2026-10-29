@@ -11,7 +11,7 @@ type Device = { id: string; name: string; status: string; last_seen: string };
 type Event = { id: number; result: string; reason: string; created_at: string };
 type Config = { session_id: number | null; roi_left: number; roi_top: number; roi_right: number; roi_bottom: number };
 type ModelStatus = { pad: { ready: boolean; loaded: boolean; reason: string; model: string }; recognition: { ready: boolean; reason: string }; stable_frames: number; late_after_minutes: number };
-const API = (import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000").replace(/\/$/, "");
+const API = (import.meta.env.VITE_API_URL || (typeof window !== "undefined" && window.location.origin ? window.location.origin : "http://127.0.0.1:8000")).replace(/\/$/, "");
 const initialStudent = { student_code: "", name: "", class_id: "", date_of_birth: "" };
 const labels: Record<string, string> = { present: "Đúng giờ", late: "Đi muộn", open: "Đang mở", closed: "Đã đóng", draft: "Chưa mở", online: "Trực tuyến", offline: "Ngoại tuyến", accepted: "Chấp nhận", rejected: "Từ chối", manual: "Thủ công", error: "Lỗi" };
 const time = (value: string) => new Date(/Z$|[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`).toLocaleString("vi-VN");
