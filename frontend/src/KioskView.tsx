@@ -26,9 +26,24 @@ export default function KioskView({ api, devices, selectedSession, token, apiUrl
   const [preview, setPreview] = useState<Preview | null>(null);
   const [source, setSource] = useState("");
   const [error, setError] = useState("");
-  const [lastCheckin, setLastCheckin] = useState<{ student: Student; time: string; score?: number } | null>(null);
+  const [lastCheckin, setLastCheckin] = useState<{ student: Student; time: string; score?: number; created?: boolean } | null>(null);
   const effectiveCamera = devices.some(d => d.id === camera) ? camera : devices[0]?.id ?? "";
   const lastAcceptedRef = useRef<string>("");
+
+  // Tự động gán phiên đang chọn cho camera khi mở chế độ Kiosk
+  useEffect(() => {
+    if (!effectiveCamera || !selectedSession) return;
+    const sId = Number(selectedSession);
+    if (!sId) return;
+    void api(`/devices/${encodeURIComponent(effectiveCamera)}/config`).then(r => r.json()).then(conf => {
+      if (conf && conf.session_id !== sId) {
+        void api(`/devices/${encodeURIComponent(effectiveCamera)}/config`, {
+          method: "PUT",
+          body: JSON.stringify({ ...conf, session_id: sId })
+        });
+      }
+    }).catch(() => {});
+  }, [effectiveCamera, selectedSession, api]);
 
   // Âm thanh BÍP tổng hợp chất lượng cao qua Web Audio API của trình duyệt
   const playChime = () => {
@@ -110,9 +125,14 @@ export default function KioskView({ api, devices, selectedSession, token, apiUrl
             const stu = students.find(s => s.student_code === res.student_code) || {
               id: 0, student_code: res.student_code, name: res.student_code, class_id: null, date_of_birth: null, enrolled: true
             };
-            setLastCheckin({ student: stu, time: new Date().toLocaleTimeString("vi-VN"), score: res.pad_score });
+            setLastCheckin({
+              student: stu,
+              time: new Date().toLocaleTimeString("vi-VN"),
+              score: res.pad_score,
+              created: res.created !== false
+            });
             playChime();
-            setTimeout(() => { lastAcceptedRef.current = ""; }, 5000);
+            setTimeout(() => { lastAcceptedRef.current = ""; }, 3000);
           }
         }
       } catch (e) {
@@ -201,10 +221,10 @@ export default function KioskView({ api, devices, selectedSession, token, apiUrl
                 {/* Overlay khi nhận diện thành công */}
                 {result?.accepted && (
                   <div className="kiosk-success-flash">
-                    <div className="kiosk-success-banner">
+                    <div className="kiosk-success-banner" style={result.created === false ? { background: "rgba(37, 99, 235, 0.95)" } : undefined}>
                       <span className="check-icon">✓</span>
                       <div>
-                        <h3>XÁC THỰC THÀNH CÔNG</h3>
+                        <h3>{result.created === false ? "ĐÃ ĐIỂM DANH TRƯỚC ĐÓ" : "XÁC THỰC THÀNH CÔNG"}</h3>
                         <p>{result.student_code}</p>
                       </div>
                     </div>
@@ -223,9 +243,17 @@ export default function KioskView({ api, devices, selectedSession, token, apiUrl
           <div className="kiosk-instruction-bar">
             <span className="kiosk-instruction-icon">ℹ</span>
             <span>
-              {result?.reason
-                ? `Trạng thái: ${result.reason}`
-                : "Hướng dẫn: Sinh viên bước vào vùng ROI trung tâm, mở mắt nhìn thẳng camera để xác thực."}
+              {result?.accepted
+                ? (result.created === false
+                    ? `Sinh viên ${result.student_code} đã điểm danh trước đó trong phiên này (Có mặt).`
+                    : `Điểm danh thành công: Sinh viên ${result.student_code}.`)
+                : result?.reason
+                  ? (result.reason.includes("spoof")
+                      ? `Phát hiện nghi vấn giả mạo (Anti-Spoof từ chối)${result.pad_score !== undefined ? ` • Điểm tin cậy: ${(result.pad_score * 100).toFixed(1)}%` : ""}`
+                      : result.reason.includes("no face")
+                        ? "Đang tìm khuôn mặt trong vùng trung tâm ROI..."
+                        : `Trạng thái: ${result.reason}`)
+                  : "Hướng dẫn: Sinh viên bước vào vùng ROI trung tâm, mở mắt nhìn thẳng camera để xác thực."}
             </span>
           </div>
         </div>
@@ -241,7 +269,9 @@ export default function KioskView({ api, devices, selectedSession, token, apiUrl
                   {lastCheckin.student.name.charAt(0)}
                 </div>
                 <div>
-                  <span className="kiosk-badge-success">✓ CÓ MẶT THÀNH CÔNG</span>
+                  <span className="kiosk-badge-success" style={lastCheckin.created === false ? { background: "#2563eb" } : undefined}>
+                    {lastCheckin.created === false ? "✓ ĐÃ ĐIỂM DANH TRƯỚC ĐÓ" : "✓ CÓ MẶT THÀNH CÔNG"}
+                  </span>
                   <h3 className="kiosk-student-name">{lastCheckin.student.name}</h3>
                   <span className="kiosk-student-id">{lastCheckin.student.student_code}</span>
                 </div>

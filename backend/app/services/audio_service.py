@@ -51,8 +51,17 @@ def _play_worker(sound_type: str = "success") -> None:
         logger.debug(f"Audio playback error: {exc}")
 
 
-def play_attendance_sound() -> None:
-    """Trigger attendance success sound from computer speaker (non-blocking)."""
+_last_sound_time = 0.0
+
+
+def play_attendance_sound(cooldown: float = 2.0) -> None:
+    """Trigger attendance success sound from computer speaker (non-blocking, rate-limited)."""
+    global _last_sound_time
+    import time
+    now = time.monotonic()
+    if now - _last_sound_time < cooldown:
+        return
+    _last_sound_time = now
     threading.Thread(target=_play_worker, args=("success",), daemon=True).start()
 
 

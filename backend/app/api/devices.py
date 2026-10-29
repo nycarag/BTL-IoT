@@ -27,6 +27,21 @@ def config_response(device_id, db):
     config = db.get(DeviceConfig, device_id)
     values = {key: getattr(config, key) for key in DeviceConfigInput.model_fields} if config else DeviceConfigInput().model_dump()
     session = db.get(AttendanceSession, values["session_id"]) if values["session_id"] else None
+    if session is None or session.status != "open":
+        open_session = db.scalar(
+            select(AttendanceSession)
+            .where(AttendanceSession.status == "open")
+            .order_by(AttendanceSession.id.desc())
+        )
+        if open_session is not None:
+            if config is None:
+                config = DeviceConfig(device_id=device_id, session_id=open_session.id)
+                db.add(config)
+            else:
+                config.session_id = open_session.id
+            db.commit()
+            values["session_id"] = open_session.id
+            session = open_session
     return {**values, "active": session is not None and session.status == "open"}
 
 

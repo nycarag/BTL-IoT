@@ -193,6 +193,29 @@ void setup() {
         return;
     }
 
+    // ========================================================
+    // CAU HINH CAM BIEN OV2640: KHU AM XANH, CAN BANG TRANG, CHONG NHIEU
+    // ========================================================
+    sensor_t * s = esp_camera_sensor_get();
+    if (s != NULL) {
+        s->set_whitebal(s, 1);       // 1 = Bat Auto White Balance (Can bang trang tu dong)
+        s->set_awb_gain(s, 1);       // 1 = Bat AWB Gain (Tang do nhay can bang mau)
+        s->set_wb_mode(s, 0);        // 0 = Auto (Tu dong dieu chinh theo anh sang phong)
+        s->set_exposure_ctrl(s, 1);  // 1 = Bat phoi sang tu dong (AEC)
+        s->set_aec2(s, 1);           // 1 = Bat tinh nang do sang nang cao
+        s->set_ae_level(s, 0);       // 0 = Muc phoi sang chuan (-2 den 2)
+        s->set_brightness(s, 0);     // 0 = Do sang tieu chuan (-2 den 2)
+        s->set_contrast(s, 0);       // 0 = Do tuong phan tieu chuan (-2 den 2)
+        s->set_saturation(s, 0);     // 0 = Do bao hoa mau chuan (-2 den 2)
+        s->set_special_effect(s, 0); // 0 = Khong hieu ung mau (No Effect)
+        s->set_gainceiling(s, (gainceiling_t)2);
+        s->set_raw_gma(s, 1);        // 1 = Gamma correction giup anh trong va ro net
+        s->set_lenc(s, 1);           // 1 = Lens correction chong toi 4 goc ong kinh
+        s->set_bpc(s, 1);            // 1 = Khu diem chet den (Black pixel correction)
+        s->set_wpc(s, 1);            // 1 = Khu diem chet trang (White pixel correction)
+        s->set_dcw(s, 1);            // 1 = Chuan hoa ma tran mau sac
+    }
+
     // KHOI TAO DIEM PHAT SONG ACCESS POINT
     WiFi.mode(WIFI_AP);
     bool ap_ok = WiFi.softAP(ap_ssid, ap_password);

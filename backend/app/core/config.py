@@ -33,7 +33,7 @@ class Settings:
     frame_interval_seconds: float = float(os.getenv("FRAME_INTERVAL_SECONDS", "0.3"))
     preview_max_fps: int = max(1, min(30, int(os.getenv("PREVIEW_MAX_FPS", "20"))))
     pad_model_path: str = os.getenv("PAD_MODEL_PATH", DEFAULT_PAD_MODEL if os.path.exists(DEFAULT_PAD_MODEL) else "")
-    pad_real_threshold: float = float(os.getenv("PAD_REAL_THRESHOLD", "0.85"))
+    pad_real_threshold: float = float(os.getenv("PAD_REAL_THRESHOLD", "0.45"))
     pad_crop_scale: float = float(os.getenv("PAD_CROP_SCALE", "2.7"))
     recognition_calibrated: bool = os.getenv("RECOGNITION_CALIBRATED", "true").lower() == "true"
     pad_calibrated: bool = os.getenv("PAD_CALIBRATED", "true").lower() == "true"
