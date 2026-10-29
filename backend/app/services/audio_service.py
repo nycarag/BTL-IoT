@@ -22,8 +22,8 @@ def _play_worker(sound_type: str = "success") -> None:
     try:
         if sound_type == "success":
             if BEEP_SOUND_FILE.is_file():
-                # Try paplay (PulseAudio / PipeWire) then aplay (ALSA)
-                cmd = f"paplay '{BEEP_SOUND_FILE}' >/dev/null 2>&1 || aplay '{BEEP_SOUND_FILE}' >/dev/null 2>&1"
+                # Try pw-play (PipeWire) then paplay (PulseAudio) then aplay (ALSA)
+                cmd = f"pw-play '{BEEP_SOUND_FILE}' >/dev/null 2>&1 || paplay '{BEEP_SOUND_FILE}' >/dev/null 2>&1 || aplay '{BEEP_SOUND_FILE}' >/dev/null 2>&1"
                 ret = os.system(cmd)
                 if ret == 0:
                     return

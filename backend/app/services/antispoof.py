@@ -71,7 +71,7 @@ class AntiSpoofAdapter:
 
     @property
     def ready(self):
-        return self.session is not None and settings.pad_calibrated and 0.5 < settings.pad_real_threshold < 1
+        return self.session is not None and settings.pad_calibrated and 0.0 < settings.pad_real_threshold < 1.0
 
     def evaluate(self, image_bytes: bytes, box=None) -> PadResult:
         if not image_bytes or box is None:

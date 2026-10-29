@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 
 type Device = { id: string; name: string; status: string };
 type Preview = {
@@ -26,9 +26,10 @@ export default function CameraPanel({ api, devices, selectedSession, token, apiU
   const [paused, setPaused] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const effectiveCamera = devices.some(d => d.id === camera) ? camera : devices[0]?.id ?? "";
+  const apiRef = useRef(api);
+  apiRef.current = api;
 
   useEffect(() => {
-    setPreview(null); setSource(""); setError("");
     if (!effectiveCamera || paused) return;
     let stopped = false; let timer: number; let reconnect: number; let objectUrl = "";
     let socket: WebSocket; let lastImage = Date.now();
@@ -41,7 +42,6 @@ export default function CameraPanel({ api, devices, selectedSession, token, apiU
       socket.onopen = () => socket.send(JSON.stringify({ token }));
       socket.onmessage = async event => {
         if (typeof event.data === "string") {
-          if (!stopped) { release(); setSource(""); }
           return;
         }
         const currentSocket = socket;
@@ -62,27 +62,26 @@ export default function CameraPanel({ api, devices, selectedSession, token, apiU
       };
       socket.onclose = event => {
         if (stopped) return;
-        release(); setSource("");
-        setError(event.code === 4401 ? "Phiên xem camera hết hạn — đăng nhập lại" : "Mất kết nối camera — đang kết nối lại…");
-        if (event.code !== 4401) reconnect = window.setTimeout(connect, 1500);
+        setError(event.code === 4401 ? "Phiên xem camera hết hạn — đăng nhập lại" : "Đang kết nối lại luồng camera…");
+        if (event.code !== 4401) reconnect = window.setTimeout(connect, 1000);
       };
       socket.onerror = () => socket.close();
     };
     const update = async () => {
       try {
         const path = `/devices/${encodeURIComponent(effectiveCamera)}/preview`;
-        const metadata: Preview = await (await api(path, { signal: controller.signal, cache: "no-store" })).json();
+        const metadata: Preview = await (await apiRef.current(path, { signal: controller.signal, cache: "no-store" })).json();
         if (!stopped) {
           setPreview(metadata);
-          if (!metadata.available || Date.now() - lastImage > 5000) { release(); setSource(""); }
+          if (Date.now() - lastImage > 15000 && !metadata.available) { release(); setSource(""); }
         }
       } catch (e) {
-        if (!stopped) { release(); setSource(""); setPreview(null); setError(e instanceof Error ? e.message : "Mất kết nối ảnh camera"); }
+        if (!stopped) { setError(e instanceof Error ? e.message : "Mất kết nối ảnh camera"); }
       } finally { if (!stopped) timer = window.setTimeout(update, 800); }
     };
     connect(); void update();
     return () => { stopped = true; controller.abort(); clearTimeout(timer); clearTimeout(reconnect); socket?.close(); release(); };
-  }, [effectiveCamera, api, paused, token, apiUrl]);
+  }, [effectiveCamera, paused, token, apiUrl]);
 
   const result = preview?.result;
   const wrongSession = Boolean(preview && (selectedSession ? Number(selectedSession) !== preview.config.session_id : false));

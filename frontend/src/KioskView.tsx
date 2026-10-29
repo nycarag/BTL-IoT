@@ -30,27 +30,54 @@ export default function KioskView({ api, devices, selectedSession, token, apiUrl
   const effectiveCamera = devices.some(d => d.id === camera) ? camera : devices[0]?.id ?? "";
   const lastAcceptedRef = useRef<string>("");
 
+  const studentsRef = useRef(students);
+  studentsRef.current = students;
+  const apiRef = useRef(api);
+  apiRef.current = api;
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
+  // Khởi tạo và mở khóa AudioContext khi người dùng tương tác với trang
+  const getAudioContext = () => {
+    if (!audioCtxRef.current) {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (AudioCtx) audioCtxRef.current = new AudioCtx();
+    }
+    if (audioCtxRef.current && audioCtxRef.current.state === "suspended") {
+      audioCtxRef.current.resume().catch(() => {});
+    }
+    return audioCtxRef.current;
+  };
+
+  useEffect(() => {
+    const unlock = () => { getAudioContext(); };
+    window.addEventListener("click", unlock, { once: true });
+    window.addEventListener("keydown", unlock, { once: true });
+    return () => {
+      window.removeEventListener("click", unlock);
+      window.removeEventListener("keydown", unlock);
+    };
+  }, []);
+
   // Tự động gán phiên đang chọn cho camera khi mở chế độ Kiosk
   useEffect(() => {
     if (!effectiveCamera || !selectedSession) return;
     const sId = Number(selectedSession);
     if (!sId) return;
-    void api(`/devices/${encodeURIComponent(effectiveCamera)}/config`).then(r => r.json()).then(conf => {
+    void apiRef.current(`/devices/${encodeURIComponent(effectiveCamera)}/config`).then(r => r.json()).then(conf => {
       if (conf && conf.session_id !== sId) {
-        void api(`/devices/${encodeURIComponent(effectiveCamera)}/config`, {
+        void apiRef.current(`/devices/${encodeURIComponent(effectiveCamera)}/config`, {
           method: "PUT",
           body: JSON.stringify({ ...conf, session_id: sId })
         });
       }
     }).catch(() => {});
-  }, [effectiveCamera, selectedSession, api]);
+  }, [effectiveCamera, selectedSession]);
 
   // Âm thanh BÍP tổng hợp chất lượng cao qua Web Audio API của trình duyệt
   const playChime = () => {
     try {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (!AudioCtx) return;
-      const ctx = new AudioCtx();
+      const ctx = getAudioContext();
+      if (!ctx) return;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = "sine";
@@ -68,7 +95,6 @@ export default function KioskView({ api, devices, selectedSession, token, apiUrl
   };
 
   useEffect(() => {
-    setPreview(null); setSource(""); setError("");
     if (!effectiveCamera) return;
     let stopped = false; let timer: number; let reconnect: number; let objectUrl = "";
     let socket: WebSocket; let lastImage = Date.now();
@@ -82,7 +108,7 @@ export default function KioskView({ api, devices, selectedSession, token, apiUrl
       socket.onopen = () => socket.send(JSON.stringify({ token }));
       socket.onmessage = async event => {
         if (typeof event.data === "string") {
-          if (!stopped) { release(); setSource(""); }
+          // Nhịp tim/giữ kết nối từ backend: Giữ nguyên khung hình hiện tại, KHÔNG xóa source gây chớp giật
           return;
         }
         const currentSocket = socket;
@@ -103,9 +129,9 @@ export default function KioskView({ api, devices, selectedSession, token, apiUrl
       };
       socket.onclose = event => {
         if (stopped) return;
-        release(); setSource("");
-        setError(event.code === 4401 ? "Phiên xem camera hết hạn — đăng nhập lại" : "Mất kết nối camera — đang thử lại...");
-        if (event.code !== 4401) reconnect = window.setTimeout(connect, 1500);
+        // Giữ lại khung hình gần nhất trên màn hình, không xóa source gây giật màn hình
+        setError(event.code === 4401 ? "Phiên xem camera hết hạn — đăng nhập lại" : "Đang kết nối lại luồng camera…");
+        if (event.code !== 4401) reconnect = window.setTimeout(connect, 1000);
       };
       socket.onerror = () => socket.close();
     };
@@ -113,16 +139,20 @@ export default function KioskView({ api, devices, selectedSession, token, apiUrl
     const update = async () => {
       try {
         const path = `/devices/${encodeURIComponent(effectiveCamera)}/preview`;
-        const metadata: Preview = await (await api(path, { signal: controller.signal, cache: "no-store" })).json();
+        const metadata: Preview = await (await apiRef.current(path, { signal: controller.signal, cache: "no-store" })).json();
         if (!stopped) {
           setPreview(metadata);
-          if (!metadata.available || Date.now() - lastImage > 5000) { release(); setSource(""); }
+          // Chỉ xóa source khi camera mất tín hiệu hoàn toàn quá 15 giây
+          if (Date.now() - lastImage > 15000 && !metadata.available) {
+            release();
+            setSource("");
+          }
 
           // Kích hoạt phản hồi khi nhận diện thành công
           const res = metadata?.result;
           if (res?.accepted && res.student_code && res.student_code !== lastAcceptedRef.current) {
             lastAcceptedRef.current = res.student_code;
-            const stu = students.find(s => s.student_code === res.student_code) || {
+            const stu = studentsRef.current.find(s => s.student_code === res.student_code) || {
               id: 0, student_code: res.student_code, name: res.student_code, class_id: null, date_of_birth: null, enrolled: true
             };
             setLastCheckin({
@@ -136,13 +166,15 @@ export default function KioskView({ api, devices, selectedSession, token, apiUrl
           }
         }
       } catch (e) {
-        if (!stopped) { release(); setSource(""); setPreview(null); setError(e instanceof Error ? e.message : "Mất kết nối ảnh camera"); }
+        if (!stopped) {
+          setError(e instanceof Error ? e.message : "Mất kết nối ảnh camera");
+        }
       } finally { if (!stopped) timer = window.setTimeout(update, 600); }
     };
 
     connect(); void update();
     return () => { stopped = true; controller.abort(); clearTimeout(timer); clearTimeout(reconnect); socket?.close(); release(); };
-  }, [effectiveCamera, api, token, apiUrl, students]);
+  }, [effectiveCamera, token, apiUrl]);
 
   const roi = preview?.config;
   const result = preview?.result;
