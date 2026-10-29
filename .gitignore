@@ -12,9 +12,12 @@ __pycache__/
 .idea/
 *.tmp
 
-# Environments
+# Environments & Dependencies
 .env
 .venv
 env/
 venv/
 ENV/
+node_modules/
+*.db
+

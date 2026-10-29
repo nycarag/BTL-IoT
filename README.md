@@ -1,8 +1,8 @@
-# Hệ Thống Camera Điểm Danh Sinh Viên Thông Minh AIoT
+# Hệ Thống Điểm Danh Sinh Viên Thông Minh AIoT
 
-Bài tập lớn học phần IOT và ứng dụng (INT14149) – Nhóm lớp tín chỉ: INT14149-20261-CT02 – Nhóm 05 – Lớp: D23CTAT01-B, Học viện Công nghệ Bưu chính Viễn thông (PTIT).
+**Bài tập lớn học phần IOT và ứng dụng (INT14149) – Nhóm lớp tín chỉ: INT14149-20261-CT02 – Nhóm 05 – Lớp: D23CTAT01-B, Học viện Công nghệ Bưu chính Viễn thông (PTIT).**
 
-Hệ thống điểm danh sinh viên tự động sử dụng vi điều khiển biên ESP32-CAM truyền luồng video qua Wi-Fi nội bộ đến máy chủ AI, kết hợp phòng thủ giả mạo khuôn mặt đa tầng (Face Anti-Spoofing - FAS) và giao diện điều khiển Kiosk Streamlit.
+Hệ thống điểm danh sinh viên tự động theo kiến trúc phân tầng biên - máy chủ (Decoupled Edge-Server Architecture): Thiết bị biên ESP32-CAM thu nhận và nén hình ảnh, Máy chủ FastAPI điều phối mô hình học sâu chống giả mạo **MiniFASNetV2 (ONNX)** kết hợp mạng nơ-ron tích chập **ResNet-34 (128D Embedding)**, giao diện Web Kiosk chuyên nghiệp xây dựng bằng **React + TypeScript + Tailwind CSS** và phản hồi âm thanh còi bíp tức thì qua loa máy tính (Laptop Audio HMI).
 
 ---
 
@@ -21,134 +21,146 @@ Hệ thống điểm danh sinh viên tự động sử dụng vi điều khiển
 
 ---
 
-## 2. Kiến Trúc Hệ Thống 4 Tầng
+## 2. Kiến Trúc Hệ Thống Phân Tầng Decoupled (Edge - Backend - Frontend)
 
-```
+```text
 ┌────────────────────────────────────────────────────────────────────────┐
-│ TẦNG 1: THIẾT BỊ BIÊN (EDGE SENSING LAYER)                             │
+│ TẦNG 1: THIẾT BỊ THU NHẬN HÌNH ẢNH (EDGE SENSING LAYER)                │
 │ Module ESP32-CAM + Cảm biến OV2640 (Độ phân giải CIF 400x296)          │
-│ Mạch nguồn chống sụt áp (Tụ 100µF) + Firmware phát Wi-Fi AP Cổng 81    │
+│ Chế độ Wi-Fi SoftAP (SSID: ESP32_DIEM_DANH - IP: 192.168.4.1)          │
+│ (Hoặc Webcam Laptop cục bộ qua chế độ chuyển đổi nhanh)                │
 └───────────────────────────────────┬────────────────────────────────────┘
-                                    │ Luồng HTTP MJPEG (WLAN 802.11b/g/n)
+                                    │ HTTP MJPEG / JPEG Multipart
 ┌───────────────────────────────────▼────────────────────────────────────┐
-│ TẦNG 2: MẠNG TRUYỀN THÔNG & XẢ ĐỆM (NETWORK DRAIN BUFFER)             │
-│ Kết nối Socket TCP 192.168.4.1:81/stream                              │
-│ Bộ đọc Zero-Latency: Xả gói tích lũy, trích xuất cặp byte JPEG mới nhất│
+│ TẦNG 2: MÁY CHỦ DỊCH VỤ TRUNG TÂM (FASTAPI BACKEND SERVICE)            │
+│ 1. Bộ lọc chất lượng & ROI không gian (Sharpness LapVar, ROI 0.15-0.85)│
+│ 2. Khối ổn định chuỗi khung hình (Multi-frame Stability Tracking)      │
+│ 3. Mô hình học sâu Anti-Spoofing: MiniFASNetV2 (ONNX CPU Runtime)      │
+│ 4. Mạng nơ-ron nhận diện khuôn mặt ResNet-34 trích xuất vector 128D    │
+│ 5. Cơ sở dữ liệu SQLite: Quản lý lớp, sinh viên, phiên học, logs      │
+│ 6. Phản hồi âm thanh loa máy tính: Synthetic Beep 1800Hz / Sound Wave  │
 └───────────────────────────────────┬────────────────────────────────────┘
-                                    │ Khung ma trận ảnh số (Numpy Matrix)
+                                    │ REST API + Realtime WebSocket
 ┌───────────────────────────────────▼────────────────────────────────────┐
-│ TẦNG 3: MÁY CHỦ XỬ LÝ TRÍ TUỆ NHÂN TẠO (AI COMPUTING LAYER)           │
-│ 1. Phát hiện khuôn mặt (HOG / 68 Landmarks)                           │
-│ 2. Lọc nhiễu 3 điều kiện (Diện tích S_max, ROI trung tâm, Ổn định 1s) │
-│ 3. Phòng thủ giả mạo FAS 4 tầng (Quang học + 3D Pose + Thử thách)     │
-│ 4. Trích xuất vector 128D (ResNet-34) & So khớp đa góc (Min distance) │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ Bản ghi xác thực thành công
-┌───────────────────────────────────▼────────────────────────────────────┐
-│ TẦNG 4: ỨNG DỤNG KIOSK & PHẢN HỒI ÂM THANH (APPLICATION & AUDIO HMI)   │
-│ Giao diện Dashboard Kiosk một chiều (Streamlit)                        │
-│ Danh sách 36 sinh viên D23CTAT01-B + Tự động xuất Excel (.xlsx) chuẩn  │
-│ Phản hồi âm thanh còi bíp xác thực tức thì (1800Hz / 0ms delay)        │
+│ TẦNG 3: GIAO DIỆN NGƯỜI DÙNG KIOSK & ADMIN (REACT + TS + VITE)         │
+│ 1. Chế độ Kiosk Toàn màn hình (Kiosk HUD View): Khung ngắm laser,      │
+│    thẻ sinh viên trượt vào mượt mà kèm âm thanh Web Audio API          │
+│ 2. Bảng điều khiển Quản trị: Quản lý sinh viên, mở/đóng buổi học,     │
+│    cấu hình tọa độ ROI trực quan, điểm danh thủ công, xuất file CSV    │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 3. Kiến Trúc Phòng Thủ Chống Giả Mạo (Face Anti-Spoofing - FAS)
+## 3. Các Tính Năng Nổi Bật Được Cải Tổ Toàn Diện
 
-Hệ thống ngăn chặn 100% tấn công bằng ảnh tĩnh (Print Attack) và video quay sẵn lặp lại trên điện thoại (Replay Attack) qua 4 cơ chế:
-
-1. **Lọc không gian & hình học (Spatial Geometric Guard):**
-   * Chỉ khóa chủ thể có bounding box lớn nhất ($S_{\max}$) trong vùng ROI trung tâm ($0.22W \le x \le 0.78W$).
-   * Giám sát dịch tâm liên tiếp $\Delta d = \|C_t - C_{t-1}\|$. Nếu $\Delta d > 35\text{px}$, hủy phiên xác thực.
-2. **Phân tích quang học thụ động (Passive Optical & Specular Glare Defense):**
-   * Quét pixel có độ chói cực đại $Y > 250$. Nếu diện tích chói phản xạ vượt quá $12\%$ diện tích mặt, phát cảnh báo màn hình lóa và từ chối.
-   * Kiểm tra dải màu da sinh học $YCrCb$ ($125 \le Cr \le 180, 70 \le Cb \le 135$), chặn màn hình ám xanh lạnh hoặc ảnh in lệch màu.
-3. **Ước lượng tư thế 3D (`cv2.solvePnP`) & Thử thách tương tác ngẫu nhiên:**
-   * Trích xuất góc quay Euler Yaw, Pitch, Roll và tỷ lệ đối xứng khuôn mặt $\text{Sym} = d_{\text{left}} / d_{\text{right}}$ trong $< 0.15\text{ms}$.
-   * Phát lệnh thử thách ngẫu nhiên có giới hạn thời gian (4.0 giây):
-     * *Thử thách A:* Chớp mắt sinh học ($\text{EAR} \le 0.17$, mở lại trong $80\text{ms} \le \Delta t \le 550\text{ms}$).
-     * *Thử thách B:* Quay nhẹ đầu sang phải ($\text{Yaw} > 13^\circ$ hoặc $\text{Sym} > 1.45$, sau đó quay về tâm).
-     * *Thử thách C:* Quay nhẹ đầu sang trái ($\text{Yaw} < -13^\circ$ hoặc $\text{Sym} < 0.70$, sau đó quay về tâm).
-   * Video quay sẵn lặp lại trên điện thoại không thể phản hồi thử thách ngẫu nhiên trong thời hạn 4 giây.
-4. **Định danh đặc trưng ResNet-34 & Khóa Mã Sinh Viên (MSV):**
-   * Vector 128 chiều đối soát CSDL đa góc nhìn (chính diện, nghiêng trái, nghiêng phải).
-   * Khóa định danh duy nhất theo MSV, không bị trùng lặp khi có sinh viên trùng tên.
+1. **Phân tách hoàn toàn Frontend & Backend (Decoupled Client-Server)**:
+   * Loại bỏ kiến trúc Monolithic script cũ.
+   * Backend viết bằng **FastAPI** chia module rõ ràng (`api`, `services`, `models`, `schemas`, `database`), có tài liệu Swagger UI tự động tại `/docs`.
+   * Frontend viết bằng **React 18 + TypeScript + Vite + Tailwind CSS**, hỗ trợ cả chế độ Kiosk toàn màn hình cho sinh viên và Admin Dashboard cho giảng viên.
+2. **Face Anti-Spoofing bằng Deep Learning (MiniFASNetV2 ONNX)**:
+   * Sử dụng mô hình mạng nơ-ron tích chập chuyên dụng phân tích kết cấu vi mô (micro-texture) của khuôn mặt, ngăn chặn hiệu quả tấn công bằng ảnh in (Print Attack) và màn hình điện thoại (Replay Attack).
+3. **Phản hồi âm thanh tức thì từ Loa máy tính (Audio HMI)**:
+   * Do phần cứng chưa lắp còi chíp vật lý, hệ thống kích hoạt cơ chế phát âm thanh còi bíp tần số 1800Hz qua loa máy tính (`backend/app/services/audio_service.py`) kết hợp bộ tổng hợp âm thanh Web Audio API trên trình duyệt.
+4. **Cơ sở dữ liệu khuôn mặt thực tế đã nạp sẵn**:
+   * Tích hợp toàn bộ hồ sơ 36 sinh viên lớp D23CTAT01-B và vector embedding 128 chiều của các thành viên nhóm vào CSDL SQLite.
+5. **Hỗ trợ kết nối Camera linh hoạt**:
+   * Hỗ trợ luồng stream từ bo mạch **ESP32-CAM** qua Wi-Fi.
+   * Hỗ trợ cờ `--webcam` để chạy thử nghiệm trực tiếp bằng **Webcam Laptop** mà không cần cắm bo mạch ESP32.
 
 ---
 
-## 4. Cấu Trúc Thư Mục
+## 4. Cấu Trúc Thư Mục Dự Án
 
 ```
-BTL-IoT/
-├── Bao_Cao/                               # Thư mục chứa báo cáo học thuật (Word, PDF, Markdown)
-│   └── .gitkeep
-├── DiemDanh_AI/
-│   ├── app.py                             # Mã nguồn máy chủ AI & Giao diện Kiosk Streamlit
-│   ├── class_roster.json                  # CSDL 36 sinh viên lớp D23CTAT01-B
-│   ├── attendance_log.csv                 # Nhật ký điểm danh thời gian thực
-│   ├── beep_success.wav                   # Âm thanh còi bíp xác thực thành công (1800Hz)
-│   ├── run.sh                             # Script khởi chạy nhanh ứng dụng
-│   ├── requirements.txt                   # Danh sách thư viện Python
-│   └── faces/                             # Thư mục lưu ảnh khuôn mặt sinh viên mẫu (.jpg)
-│       └── .gitkeep
-├── Firmware_ESP32/
-│   ├── code_esp32_cam.ino                 # Mã nguồn C/C++ nạp module vi điều khiển biên
-│   └── code_esp32_cam.txt                 # Bản lưu trữ văn bản thuần mã nạp
-├── requirements.txt                       # Thư viện toàn cục cho dự án
-├── .gitignore                             # Cấu hình bỏ qua tệp tạm (__pycache__, *.pyc, *.tmp)
-└── README.md                              # Tài liệu hướng dẫn dự án
+IOT/
+├── backend/                     # FastAPI Backend Server
+│   ├── app/
+│   │   ├── api/                 # REST API Routers (attendance, auth, devices, students, sessions)
+│   │   ├── core/                # Cấu hình, bảo mật token, logic domain
+│   │   ├── models/              # Định nghĩa bảng SQLAlchemy (Student, Attendance, Device,...)
+│   │   ├── schemas/             # Pydantic schemas kiểm thực dữ liệu
+│   │   ├── services/            # Khối xử lý AI (MiniFASNetV2, ResNet, Audio, Detector)
+│   │   ├── database.py          # Kết nối CSDL SQLite
+│   │   └── main.py              # Khởi tạo ứng dụng FastAPI và tích hợp Frontend tĩnh
+│   ├── camera_bridge.py         # Cầu nối truyền ảnh độ trễ thấp từ ESP32-CAM hoặc Webcam
+│   ├── seed.py                  # Kịch bản nạp danh sách lớp và vector khuôn mặt tự động
+│   └── tests/                   # 41 bài kiểm thử tự động (Unit Tests)
+├── frontend/                    # Giao diện Web Kiosk & Quản trị
+│   ├── src/
+│   │   ├── App.tsx              # Điều phối giao diện, xác thực và quản lý tab
+│   │   ├── KioskView.tsx        # Chế độ Kiosk Điểm Danh HUD toàn màn hình
+│   │   ├── CameraPanel.tsx      # Bảng điều khiển camera và stream WebSocket
+│   │   └── styles.css           # Giao diện Modern Dark HUD & Glassmorphism
+│   ├── dist/                    # Bản build production tối ưu (FastAPI phục vụ trực tiếp)
+│   └── package.json
+├── data/
+│   ├── attendance.db            # CSDL SQLite lưu trữ sinh viên, phiên học, lịch sử điểm danh
+│   ├── class_roster.json        # Danh sách chính thức 36 sinh viên lớp D23CTAT01-B
+│   └── faces/                   # Ảnh chân dung thực tế của các thành viên nhóm
+├── models/
+│   └── minifasnet-v2/           # Trọng số mô hình học sâu MiniFASNetV2.onnx
+├── firmware/
+│   ├── esp32_cam/               # Firmware ESP32-CAM chế độ trạm Station
+│   └── esp32_cam_softap/        # Firmware ESP32-CAM chế độ điểm phát sóng Access Point
+├── Bao_Cao/                     # Báo cáo Word (.docx) và PDF (.pdf) chuẩn biểu mẫu PTIT
+├── start.sh                     # Kịch bản khởi động hệ thống 1-click
+├── start_esp32.sh               # Kịch bản kết nối Camera ESP32-CAM
+└── start_webcam.sh              # Kịch bản kết nối Webcam Laptop cục bộ
 ```
 
 ---
 
-## 5. Hướng Dẫn Cài Đặt & Vận Hành
+## 5. Hướng Dẫn Cài Đặt & Khởi Chạy
 
-### Bước 1: Nạp Firmware cho ESP32-CAM
-1. Mở Arduino IDE, chọn board `AI Thinker ESP32-CAM`.
-2. Cấu hình thông số:
-   * Partition Scheme: `Huge APP (3MB No OTA/1MB SPIFFS)`
-   * CPU Frequency: `240MHz (WiFi/BT)`
-   * Flash Frequency: `80MHz`
-3. Mở tệp `Firmware_ESP32/code_esp32_cam.ino`.
-4. Nạp code:
-   * **Nếu dùng đế nạp ESP32-CAM-MB:** Cắm thẳng cáp Micro-USB từ máy tính vào cổng trên đế và bấm Upload (nhấn giữ nút `IO0/BOOT` 1-2s nếu màn hình hiện `Connecting...`).
-   * **Nếu dùng mạch FTDI rời:** Nối GPIO0 với GND khi nạp, tháo ra sau khi nạp xong.
-5. Sau khi khởi động, ESP32-CAM tự phát mạng Wi-Fi:
-   * SSID: `ESP32_DIEM_DANH`
-   * Mật khẩu: `12345678`
-   * IP cố định: `192.168.4.1`
-   * Luồng video: `http://192.168.4.1:81/stream`
+### Cách 1: Khởi chạy 1-Click nhanh nhất (Khuyên dùng)
 
-### Bước 2: Cài Đặt Môi Trường Máy Chủ AI
-Yêu cầu Python 3.10 trở lên trên hệ điều hành Linux (Ubuntu/Debian) hoặc macOS/Windows.
+1. **Bước 1: Cài đặt thư viện phụ thuộc (nếu chưa có)**
+   ```bash
+   pip install fastapi uvicorn sqlalchemy pydantic opencv-python onnxruntime face_recognition Pillow python-dotenv python-multipart
+   ```
+
+2. **Bước 2: Chạy hệ thống 1-click**
+   ```bash
+   ./start.sh
+   ```
+   *Hệ thống sẽ tự động kiểm tra CSDL, nạp danh sách 36 sinh viên, trích xuất vector khuôn mặt và mở máy chủ tại: `http://localhost:8000`.*
+
+3. **Bước 3: Mở trình duyệt và đăng nhập**
+   * Truy cập: **`http://localhost:8000`**
+   * Tài khoản quản trị: **`admin`** / Mật khẩu: **`admin123456`**
+   * Giao diện sẽ tự động mở tab **🖥️ Kiosk Điểm Danh**.
+
+4. **Bước 4: Kết nối luồng Camera (Mở terminal thứ hai)**
+   * **Nếu dùng Webcam máy tính để test nhanh**:
+     ```bash
+     ./start_webcam.sh
+     ```
+   * **Nếu dùng phần cứng ESP32-CAM qua Wi-Fi**:
+     - Kết nối máy tính vào Wi-Fi do ESP32 phát ra: `ESP32_DIEM_DANH` (mật khẩu: `12345678`).
+     - Chạy script kết nối:
+       ```bash
+       ./start_esp32.sh
+       ```
+
+---
+
+### Cách 2: Chạy bằng Docker Compose
 
 ```bash
-# Cài đặt các gói phụ thuộc
-pip install -r requirements.txt
+docker compose up --build -d
 ```
-
-### Bước 3: Khởi Chạy Ứng Dụng Kiosk
-1. Kết nối máy tính vào Wi-Fi `ESP32_DIEM_DANH`.
-2. Chạy ứng dụng bằng lệnh:
-
-```bash
-cd DiemDanh_AI
-./run.sh
-# Hoặc chạy trực tiếp:
-streamlit run app.py --server.port 8501 --server.headless true
-```
-
-3. Mở trình duyệt tại địa chỉ `http://localhost:8501`. Màn hình Kiosk sẽ tự động kết nối luồng camera và kích hoạt bộ nhận diện.
+* Bảng điều khiển Web: `http://localhost:8080`
+* API Backend: `http://localhost:8000`
 
 ---
 
-## 6. Chỉ Số Đo Lường Kỹ Thuật
+## 6. Kiểm Thử Hệ Thống (Unit Tests)
 
-* **Tốc độ khung hình (CIF 400x296):** 26.5 FPS
-* **Tốc độ xử lý AI toàn trình:** 24.2 FPS
-* **Thời gian tính toán 3D Head Pose `solvePnP`:** < 0.15 ms/frame
-* **Độ trễ truyền dẫn luồng:** 142 ms (bộ đọc xả đệm triệt tiêu tích lũy)
-* **Độ chính xác nhận diện đa góc:** 96.4%
-* **Tỷ lệ chặn ảnh in và video giả mạo:** 100%
-* **Công suất tiêu thụ ESP32-CAM:** 1.25 W (5V - 250mA)
+Dự án bao gồm bộ 41 bài kiểm thử tự động bao phủ toàn bộ luồng nghiệp vụ API, bộ lọc ROI, phát hiện giả mạo và độ trễ buffer:
+
+```bash
+cd backend
+python3 -m unittest discover -s tests -v
+```
+*Kết quả: 41 tests passed 100%.*
