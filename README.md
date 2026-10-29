@@ -1,6 +1,6 @@
 # Hệ Thống Camera Điểm Danh Sinh Viên Thông Minh AIoT
 
-Dự án Bài tập lớn học phần **IOT và ứng dụng** (Mã học phần: `INT14149`) – Nhóm lớp: **INT14149-20261-CT02** – Nhóm 05 – Lớp sinh hoạt: **D23CTAT01-B**, Học viện Công nghệ Bưu chính Viễn thông (PTIT).
+Bài tập lớn học phần IOT và ứng dụng (INT14149) – Nhóm lớp tín chỉ: INT14149-20261-CT02 – Nhóm 05 – Lớp: D23CTAT01-B, Học viện Công nghệ Bưu chính Viễn thông (PTIT).
 
 Hệ thống điểm danh sinh viên tự động sử dụng vi điều khiển biên ESP32-CAM truyền luồng video qua Wi-Fi nội bộ đến máy chủ AI, kết hợp phòng thủ giả mạo khuôn mặt đa tầng (Face Anti-Spoofing - FAS) và giao diện điều khiển Kiosk Streamlit.
 
@@ -8,12 +8,11 @@ Hệ thống điểm danh sinh viên tự động sử dụng vi điều khiển
 
 ## 1. Thông Tin Nhóm Nghiên Cứu & Học Phần
 
-* **Học phần:** IOT và ứng dụng (3 Tín chỉ)
-* **Mã học phần:** `INT14149`
-* **Nhóm lớp tín chỉ:** `INT14149-20261-CT02`
-* **Kỳ học:** Học kỳ 1 Năm học 2026 - 2027
-* **Lớp sinh hoạt:** D23CTAT01-B
+* **Học phần:** IOT và ứng dụng (INT14149)
+* **Nhóm lớp tín chỉ:** INT14149-20261-CT02
 * **Nhóm:** 05
+* **Lớp:** D23CTAT01-B
+* **Đơn vị:** Học viện Công nghệ Bưu chính Viễn thông (PTIT)
 * **Giảng viên hướng dẫn:** TS. Lê Văn Vịnh
 * **Thành viên thực hiện:**
   1. Đỗ Trung Kiên – Mã SV: `B23DCAT156`

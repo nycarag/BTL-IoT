@@ -305,12 +305,12 @@ def create_excel_report(roster, attendance_records):
     ws['A1'].alignment = Alignment(horizontal="center", vertical="center")
     
     ws.merge_cells('A2:G2')
-    ws['A2'] = "BẢNG ĐIỂM DANH SINH VIÊN - HỌC PHẦN: IOT VÀ ỨNG DỤNG (INT14149)"
+    ws['A2'] = "BẢNG ĐIỂM DANH SINH VIÊN - BÀI TẬP LỚN HỌC PHẦN IOT VÀ ỨNG DỤNG (INT14149)"
     ws['A2'].font = Font(name="Arial", size=14, bold=True, color="1E3A8A")
     ws['A2'].alignment = Alignment(horizontal="center", vertical="center")
     
     ws.merge_cells('A3:G3')
-    ws['A3'] = f"Nhóm lớp: INT14149-20261-CT02  |  Lớp: D23CTAT01-B (Nhóm 05)  |  HK1 (2026 - 2027)  |  GVHD: TS. Lê Văn Vịnh  |  Ngày xuất: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+    ws['A3'] = f"Nhóm lớp tín chỉ: INT14149-20261-CT02  |  Nhóm 05  |  Lớp: D23CTAT01-B  |  GVHD: TS. Lê Văn Vịnh  |  Ngày xuất: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
     ws['A3'].font = Font(name="Arial", size=10, italic=True, color="475569")
     ws['A3'].alignment = Alignment(horizontal="center", vertical="center")
     
@@ -651,7 +651,7 @@ st.markdown(f"""
     <div>
         <div class="header-school">HỌC VIỆN CÔNG NGHỆ BƯU CHÍNH VIỄN THÔNG • KHOA AN TOÀN THÔNG TIN</div>
         <div class="header-main-title">HỆ THỐNG ĐIỂM DANH SINH VIÊN AIoT</div>
-        <div class="header-class-info">Học phần: IOT và ứng dụng (INT14149) • Nhóm lớp: INT14149-20261-CT02 • Lớp: D23CTAT01-B (Nhóm 05) • HK1 (2026 - 2027) • GVHD: TS. Lê Văn Vịnh</div>
+        <div class="header-class-info">Bài tập lớn học phần IOT và ứng dụng (INT14149) • Nhóm lớp tín chỉ: INT14149-20261-CT02 • Nhóm 05 • Lớp: D23CTAT01-B • GVHD: TS. Lê Văn Vịnh</div>
     </div>
     <div>
         <div class="clock-display" id="live_clock_display">{time_text}</div>
