@@ -31,6 +31,7 @@ def create_session(payload: SessionCreate, _: str = Depends(verify_token), db: S
 
 
 def _set_status(session_id: int, target: str, db: Session) -> AttendanceSession:
+    db.rollback()
     if db.bind.dialect.name == "sqlite":
         db.execute(text("BEGIN IMMEDIATE"))
     session = db.get(AttendanceSession, session_id)
@@ -40,6 +41,16 @@ def _set_status(session_id: int, target: str, db: Session) -> AttendanceSession:
     if target == "open":
         if session.status == "closed":
             raise HTTPException(status_code=409, detail="Closed session cannot be reopened")
+        open_sessions = db.scalars(
+            select(AttendanceSession).where(
+                AttendanceSession.class_id == session.class_id,
+                AttendanceSession.status == "open",
+                AttendanceSession.id != session_id
+            )
+        ).all()
+        for old in open_sessions:
+            old.status = "closed"
+            old.ends_at = now
         session.status = "open"
         session.starts_at = session.starts_at or now
     else:

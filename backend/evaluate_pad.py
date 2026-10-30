@@ -40,8 +40,8 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--threshold", type=float, default=settings.pad_real_threshold)
     args = parser.parse_args()
-    if not .5 < args.threshold < 1:
-        parser.error("threshold must be greater than 0.5 and less than 1")
+    if not 0.0 < args.threshold < 1.0:
+        parser.error("threshold must be greater than 0.0 and less than 1.0")
     if args.output.exists():
         parser.error("output exists; choose a new file to preserve earlier results")
     adapter = AntiSpoofAdapter()

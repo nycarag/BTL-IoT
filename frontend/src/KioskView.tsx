@@ -2,7 +2,8 @@ import { useEffect, useState, useRef } from "react";
 
 type Device = { id: string; name: string; status: string };
 type Student = { id: number; student_code: string; name: string; class_id: number | null; date_of_birth: string | null; enrolled: boolean };
-type Attendance = { id: number; student_id: number; student_code: string; student_name: string; checked_at: string; status: string; verification: string };
+type Classroom = { id: number; code: string; name: string };
+type Attendance = { id: number; session_id?: number; student_id: number; student_code: string; student_name: string; checked_at: string; status: string; verification: string };
 type Session = { id: number; class_id: number; title: string; status: string };
 type Preview = {
   available: boolean; received_at?: string; session_id?: number | null;
@@ -14,14 +15,16 @@ type Props = {
   api: (path: string, init?: RequestInit) => Promise<Response>;
   devices: Device[];
   selectedSession: string;
+  onSelectSession?: (id: string) => void;
   token: string;
   apiUrl: string;
   students: Student[];
+  classes?: Classroom[];
   rows: Attendance[];
   sessions: Session[];
 };
 
-export default function KioskView({ api, devices, selectedSession, token, apiUrl, students, rows, sessions }: Props) {
+export default function KioskView({ api, devices, selectedSession, onSelectSession, token, apiUrl, students, classes, rows, sessions }: Props) {
   const [camera, setCamera] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
   const [source, setSource] = useState("");
@@ -58,20 +61,24 @@ export default function KioskView({ api, devices, selectedSession, token, apiUrl
     };
   }, []);
 
+  // Xác định phiên đang điểm danh: phiên chọn -> phiên đang mở -> phiên đầu tiên
+  const currentSession = sessions.find(s => String(s.id) === selectedSession)
+    || sessions.find(s => s.status === "open")
+    || sessions[0];
+  const currentSessionId = currentSession?.id;
+
   // Tự động gán phiên đang chọn cho camera khi mở chế độ Kiosk
   useEffect(() => {
-    if (!effectiveCamera || !selectedSession) return;
-    const sId = Number(selectedSession);
-    if (!sId) return;
+    if (!effectiveCamera || !currentSessionId) return;
     void apiRef.current(`/devices/${encodeURIComponent(effectiveCamera)}/config`).then(r => r.json()).then(conf => {
-      if (conf && conf.session_id !== sId) {
+      if (conf && conf.session_id !== currentSessionId) {
         void apiRef.current(`/devices/${encodeURIComponent(effectiveCamera)}/config`, {
           method: "PUT",
-          body: JSON.stringify({ ...conf, session_id: sId })
+          body: JSON.stringify({ ...conf, session_id: currentSessionId })
         });
       }
     }).catch(() => {});
-  }, [effectiveCamera, selectedSession]);
+  }, [effectiveCamera, currentSessionId]);
 
   // Âm thanh BÍP tổng hợp chất lượng cao qua Web Audio API của trình duyệt
   const playChime = () => {
@@ -178,18 +185,61 @@ export default function KioskView({ api, devices, selectedSession, token, apiUrl
 
   const roi = preview?.config;
   const result = preview?.result;
-  const currentSession = sessions.find(s => String(s.id) === selectedSession) || sessions[0];
-  const presentCount = rows.filter(r => r.status === "present" || r.status === "late").length;
-  const totalCount = students.length || 36;
+
+  // Lọc chính xác các lượt điểm danh thuộc phiên hiện tại
+  const sessionRows = currentSessionId
+    ? rows.filter(r => r.session_id === undefined || r.session_id === currentSessionId)
+    : rows;
+
+  // Khử trùng: Đếm số lượng sinh viên DUY NHẤT có mặt trong phiên này (tránh đếm lặp)
+  const presentStudentIds = new Set(
+    sessionRows
+      .filter(r => r.status === "present" || r.status === "late")
+      .map(r => r.student_id)
+  );
+  const presentCount = presentStudentIds.size;
+
+  // Sĩ số thực tế của lớp thuộc phiên đang chọn
+  const classStudents = currentSession
+    ? students.filter(s => s.class_id === currentSession.class_id)
+    : students;
+  const totalCount = classStudents.length || students.length || 36;
+
+  const effectiveDevice = devices.find(d => d.id === effectiveCamera);
+  const deviceDisplayName = effectiveDevice ? effectiveDevice.name : effectiveCamera || "CAMERA";
+  const studentClassName = classes?.find(c => c.id === (lastCheckin?.student.class_id ?? currentSession?.class_id))?.code || "D23CTAT01-B";
 
   return (
     <div className="kiosk-container">
       <div className="kiosk-header">
         <div className="kiosk-title-block">
-          <span className="kiosk-badge-school">HỌC VIỆN CÔNG NGHỆ BƯU CHÍNH VIỄN THÔNG (PTIT)</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+            <span className="kiosk-badge-school">HỌC VIỆN CÔNG NGHỆ BƯU CHÍNH VIỄN THÔNG (PTIT)</span>
+            {currentSession && (
+              <span className={`kiosk-session-badge ${currentSession.status}`}>
+                {currentSession.status === "open" ? "● ĐANG MỞ ĐIỂM DANH" : "🔒 ĐÃ ĐÓNG PHIÊN"}
+              </span>
+            )}
+            {onSelectSession && sessions.length > 1 && (
+              <label style={{ margin: 0, display: "inline-flex", flexDirection: "row", alignItems: "center", gap: 6, fontSize: "0.75rem", color: "#a8bbb2" }}>
+                <span>Đổi buổi:</span>
+                <select
+                  className="kiosk-session-select"
+                  value={selectedSession || String(currentSessionId || "")}
+                  onChange={e => onSelectSession(e.target.value)}
+                >
+                  {sessions.map(s => (
+                    <option key={s.id} value={s.id}>
+                      #{s.id} {s.title} ({s.status === "open" ? "Đang mở" : "Đã đóng"})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
           <h1 className="kiosk-main-title">KIOSK ĐIỂM DANH SINH VIÊN THỜI GIAN THỰC</h1>
           <p className="kiosk-subtitle">
-            Học phần: <b>IoT và ứng dụng (INT14149)</b> • Lớp: <b>D23CTAT01-B</b> • Nhóm: <b>05</b>
+            Buổi học: <b>{currentSession?.title || "Điểm danh IoT"}</b> • Lớp: <b>{classes?.find(c => c.id === currentSession?.class_id)?.code || "D23CTAT01-B"}</b> • Nhóm: <b>05</b>
           </p>
         </div>
         <div className="kiosk-live-stats">
@@ -198,7 +248,7 @@ export default function KioskView({ api, devices, selectedSession, token, apiUrl
             <strong>{totalCount}</strong>
           </div>
           <div className="kiosk-stat-card success">
-            <small>ĐÃ ĐIỂM DANH</small>
+            <small>ĐÃ CÓ MẶT</small>
             <strong>{presentCount}</strong>
           </div>
           <div className="kiosk-stat-card pending">
@@ -214,7 +264,7 @@ export default function KioskView({ api, devices, selectedSession, token, apiUrl
           <div className="kiosk-camera-topbar">
             <div className="kiosk-status-pill">
               <span className={`kiosk-dot ${source ? "live" : "offline"}`}></span>
-              <span>{source ? "CAMERA ONLINE (ESP32-CAM)" : "ĐANG CHỜ KẾT NỐI CAMERA"}</span>
+              <span>{source ? `CAMERA ONLINE (${deviceDisplayName})` : "ĐANG CHỜ KẾT NỐI CAMERA"}</span>
             </div>
             <div className="kiosk-fas-badge">
               <span>🛡️ FAS: MiniFASNetV2 + ResNet-34 ACTIVE</span>
@@ -248,6 +298,20 @@ export default function KioskView({ api, devices, selectedSession, token, apiUrl
                     <div className="roi-corner bottom-right"></div>
                     <span className="roi-label">VÙNG ĐIỂM DANH TRUNG TÂM</span>
                     <div className="roi-scanline"></div>
+                  </div>
+                )}
+                {/* Khung chữ nhật bám theo khuôn mặt nhận diện (Face Bounding Box) */}
+                {result?.box && result?.frame_size && (
+                  <div
+                    className={`kiosk-face-box ${result.accepted ? "verified" : result.reason?.includes("spoof") ? "spoof" : "scanning"}`}
+                    style={{
+                      left: `${(result.box[0] / result.frame_size[0]) * 100}%`,
+                      top: `${(result.box[1] / result.frame_size[1]) * 100}%`,
+                      width: `${(result.box[2] / result.frame_size[0]) * 100}%`,
+                      height: `${(result.box[3] / result.frame_size[1]) * 100}%`,
+                    }}
+                  >
+                    <span className="face-tag">{result.student_code || (result.accepted ? "XÁC THỰC" : "NHẬN DIỆN")}</span>
                   </div>
                 )}
                 {/* Overlay khi nhận diện thành công */}
@@ -301,7 +365,7 @@ export default function KioskView({ api, devices, selectedSession, token, apiUrl
                   {lastCheckin.student.name.charAt(0)}
                 </div>
                 <div>
-                  <span className="kiosk-badge-success" style={lastCheckin.created === false ? { background: "#2563eb" } : undefined}>
+                  <span className={lastCheckin.created === false ? "kiosk-badge-warning" : "kiosk-badge-success"}>
                     {lastCheckin.created === false ? "✓ ĐÃ ĐIỂM DANH TRƯỚC ĐÓ" : "✓ CÓ MẶT THÀNH CÔNG"}
                   </span>
                   <h3 className="kiosk-student-name">{lastCheckin.student.name}</h3>
@@ -311,12 +375,12 @@ export default function KioskView({ api, devices, selectedSession, token, apiUrl
 
               <div className="kiosk-card-details">
                 <div className="detail-row">
-                  <span>Lớp tín chỉ:</span>
-                  <b>INT14149-20261-CT02</b>
+                  <span>Buổi học:</span>
+                  <b>{currentSession?.title || "Điểm danh IoT"}</b>
                 </div>
                 <div className="detail-row">
                   <span>Lớp sinh hoạt:</span>
-                  <b>D23CTAT01-B</b>
+                  <b>{studentClassName}</b>
                 </div>
                 <div className="detail-row">
                   <span>Thời gian điểm danh:</span>
@@ -337,7 +401,7 @@ export default function KioskView({ api, devices, selectedSession, token, apiUrl
           )}
 
           <div className="kiosk-recent-list">
-            <h3>Danh sách điểm danh gần nhất</h3>
+            <h3>Danh sách điểm danh gần nhất (Phiên hiện tại)</h3>
             <div className="kiosk-recent-table-wrap">
               <table>
                 <thead>
@@ -349,15 +413,19 @@ export default function KioskView({ api, devices, selectedSession, token, apiUrl
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.slice(0, 8).map(r => (
+                  {sessionRows.slice(0, 8).map(r => (
                     <tr key={r.id}>
                       <td>{new Date(r.checked_at).toLocaleTimeString("vi-VN")}</td>
                       <td><b>{r.student_code}</b></td>
                       <td>{r.student_name}</td>
-                      <td><span className="badge present">Có mặt</span></td>
+                      <td>
+                        <span className={`badge ${r.status}`}>
+                          {r.status === "late" ? "Đi muộn" : "Có mặt"}
+                        </span>
+                      </td>
                     </tr>
                   ))}
-                  {!rows.length && (
+                  {!sessionRows.length && (
                     <tr>
                       <td colSpan={4} className="empty">Chưa có lượt điểm danh nào trong phiên.</td>
                     </tr>

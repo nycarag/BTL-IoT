@@ -57,6 +57,19 @@ class WorkflowTests(unittest.TestCase):
         self.post(f"/sessions/{self.session_id}/close", {})
         self.assertEqual(self.frame().status_code, 409)
 
+    def test_start_session_auto_closes_previous_open_session(self):
+        # Tạo thêm phiên thứ 2 cho cùng lớp học và mở phiên
+        session_2_id = self.post("/sessions", {"class_id": self.class_id, "title": "Buổi học số 2"}).json()["id"]
+        res = self.post(f"/sessions/{session_2_id}/start", {})
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["status"], "open")
+        # Phiên 1 trước đó phải được tự động chuyển sang closed
+        with self.factory() as db:
+            old = db.get(AttendanceSession, self.session_id)
+            self.assertEqual(old.status, "closed")
+            new_s = db.get(AttendanceSession, session_2_id)
+            self.assertEqual(new_s.status, "open")
+
 
 class EvaluationTests(unittest.TestCase):
     def test_metrics(self):
