@@ -150,9 +150,15 @@ async def _process_frame(device_id, image, session_id, db):
         await event(db, session_id, device_id, "error", "Pipeline failed; retry or use manual verification")
         return respond({"accepted": False, "reason": "Pipeline failed; retry or use manual verification"})
     await event(db, session_id, device_id, "accepted", "PAD and recognition passed", recognition.student_code)
-    play_attendance_sound()
+    if created:
+        play_attendance_sound()
     await manager.broadcast(session_id, {"type": "attendance", "created": created, "attendance_id": row.id})
-    return respond({"accepted": True, "created": created, "student_code": recognition.student_code}, detection)
+    return respond({
+        "accepted": True,
+        "created": created,
+        "student_code": recognition.student_code,
+        "student_name": student.name if student else recognition.student_code
+    }, detection)
 
 
 @router.post("/sessions/{session_id}/manual-attendance")

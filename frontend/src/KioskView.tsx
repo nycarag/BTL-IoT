@@ -30,6 +30,8 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
   const [hasSource, setHasSource] = useState(false);
   const [error, setError] = useState("");
   const [lastCheckin, setLastCheckin] = useState<{ student: Student; time: string; score?: number; created?: boolean } | null>(null);
+  const [activeAlert, setActiveAlert] = useState<{ name: string; student_code: string; isNew: boolean; time: string } | null>(null);
+  const alertTimerRef = useRef<number | null>(null);
   const effectiveCamera = devices.some(d => d.id === camera) ? camera : devices[0]?.id ?? "";
   const lastAcceptedRef = useRef<string>("");
   const imgRef = useRef<HTMLImageElement>(null);
@@ -172,19 +174,41 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
 
           // Kích hoạt phản hồi khi nhận diện thành công
           const res = metadata?.result;
-          if (res?.accepted && res.student_code && res.student_code !== lastAcceptedRef.current) {
-            lastAcceptedRef.current = res.student_code;
-            const stu = studentsRef.current.find(s => s.student_code === res.student_code) || {
-              id: 0, student_code: res.student_code, name: res.student_code, class_id: null, date_of_birth: null, enrolled: true
-            };
-            setLastCheckin({
-              student: stu,
-              time: new Date().toLocaleTimeString("vi-VN"),
-              score: res.pad_score,
-              created: res.created !== false
-            });
-            playChime();
-            setTimeout(() => { lastAcceptedRef.current = ""; }, 3000);
+          if (res?.accepted && res.student_code) {
+            const stu = studentsRef.current.find(s => s.student_code === res.student_code);
+            const studentName = stu?.name || (res as { student_name?: string }).student_name || res.student_code;
+            const isCreated = res.created !== false;
+
+            if (res.student_code !== lastAcceptedRef.current) {
+              lastAcceptedRef.current = res.student_code;
+              const checkinTime = new Date().toLocaleTimeString("vi-VN");
+              const fullStudent: Student = stu || {
+                id: 0, student_code: res.student_code, name: studentName, class_id: null, date_of_birth: null, enrolled: true
+              };
+              setLastCheckin({
+                student: fullStudent,
+                time: checkinTime,
+                score: res.pad_score,
+                created: isCreated
+              });
+
+              if (isCreated) {
+                playChime();
+              }
+
+              if (alertTimerRef.current) clearTimeout(alertTimerRef.current);
+              setActiveAlert({
+                name: studentName,
+                student_code: res.student_code,
+                isNew: isCreated,
+                time: checkinTime
+              });
+
+              alertTimerRef.current = window.setTimeout(() => {
+                setActiveAlert(null);
+                lastAcceptedRef.current = "";
+              }, 4000);
+            }
           }
         }
       } catch (e) {
@@ -195,7 +219,15 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
     };
 
     connect(); void update();
-    return () => { stopped = true; controller.abort(); clearTimeout(timer); clearTimeout(reconnect); socket?.close(); release(); };
+    return () => {
+      stopped = true;
+      controller.abort();
+      clearTimeout(timer);
+      clearTimeout(reconnect);
+      if (alertTimerRef.current) clearTimeout(alertTimerRef.current);
+      socket?.close();
+      release();
+    };
   }, [effectiveCamera, token, apiUrl]);
 
   const roi = preview?.config;
@@ -252,7 +284,7 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
               </label>
             )}
           </div>
-          <h1 className="kiosk-main-title">KIOSK ĐIỂM DANH SINH VIÊN THỜI GIAN THỰC</h1>
+          <h1 className="kiosk-main-title">KIOSK ĐIỂM DANH SINH VIÊN</h1>
           <p className="kiosk-subtitle">
             Buổi học: <b>{currentSession?.title || "Điểm danh IoT"}</b> • Lớp: <b>{classes?.find(c => c.id === currentSession?.class_id)?.code || "D23CTAT01-B"}</b> • Nhóm: <b>05</b>
           </p>
@@ -281,9 +313,6 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
               <span className={`kiosk-dot ${hasSource ? "live" : "offline"}`}></span>
               <span>{hasSource ? `CAMERA ONLINE (${deviceDisplayName})` : "ĐANG CHỜ KẾT NỐI CAMERA"}</span>
             </div>
-            <div className="kiosk-fas-badge">
-              <span>🛡️ FAS: MiniFASNetV2 + ResNet-34 ACTIVE</span>
-            </div>
             <select
               value={effectiveCamera}
               onChange={e => setCamera(e.target.value)}
@@ -310,7 +339,7 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
                   <div className="roi-corner top-right"></div>
                   <div className="roi-corner bottom-left"></div>
                   <div className="roi-corner bottom-right"></div>
-                  <span className="roi-label">VÙNG ĐIỂM DANH TRUNG TÂM</span>
+                  <span className="roi-label">KHUNG NHẬN DIỆN</span>
                   <div className="roi-scanline"></div>
                 </div>
               )}
@@ -325,17 +354,18 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
                     height: `${(result.box[3] / result.frame_size[1]) * 100}%`,
                   }}
                 >
-                  <span className="face-tag">{result.student_code || (result.accepted ? "XÁC THỰC" : "NHẬN DIỆN")}</span>
+                  <span className="face-tag">{result.student_code || (result.accepted ? "HỢP LỆ" : "ĐANG QUÉT")}</span>
                 </div>
               )}
-              {/* Overlay khi nhận diện thành công */}
-              {result?.accepted && (
+              {/* Overlay thông báo điểm danh */}
+              {activeAlert && (
                 <div className="kiosk-success-flash">
-                  <div className="kiosk-success-banner" style={result.created === false ? { background: "rgba(37, 99, 235, 0.95)" } : undefined}>
+                  <div className={`kiosk-success-banner ${activeAlert.isNew ? "new" : "existing"}`}>
                     <span className="check-icon">✓</span>
                     <div>
-                      <h3>{result.created === false ? "ĐÃ ĐIỂM DANH TRƯỚC ĐÓ" : "XÁC THỰC THÀNH CÔNG"}</h3>
-                      <p>{result.student_code}</p>
+                      <h3>{activeAlert.isNew ? "ĐIỂM DANH THÀNH CÔNG" : "ĐÃ GHI NHẬN CÓ MẶT"}</h3>
+                      <p className="student-highlight">{activeAlert.name}</p>
+                      <span className="student-subcode">{activeAlert.student_code}</span>
                     </div>
                   </div>
                 </div>
@@ -344,8 +374,7 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
             {!hasSource && (
               <div className="kiosk-empty-view">
                 <div className="kiosk-spinner"></div>
-                <p>Đang kết nối luồng camera từ ESP32-CAM / Webcam...</p>
-                <small>Chạy lệnh: python3 camera_bridge.py trên máy tính</small>
+                <p>Đang chờ kết nối camera...</p>
               </div>
             )}
           </div>
@@ -353,24 +382,24 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
           <div className="kiosk-instruction-bar">
             <span className="kiosk-instruction-icon">ℹ</span>
             <span>
-              {result?.accepted
-                ? (result.created === false
-                    ? `Sinh viên ${result.student_code} đã điểm danh trước đó trong phiên này (Có mặt).`
-                    : `Điểm danh thành công: Sinh viên ${result.student_code}.`)
-                : result?.reason
+              {activeAlert
+                ? (activeAlert.isNew
+                    ? `Điểm danh thành công: Sinh viên ${activeAlert.name} (${activeAlert.student_code}).`
+                    : `Sinh viên ${activeAlert.name} (${activeAlert.student_code}) đã có mặt trong buổi học.`)
+                : result?.reason && result.reason !== "ok"
                   ? (result.reason.includes("spoof")
-                      ? `Phát hiện nghi vấn giả mạo (Anti-Spoof từ chối)${result.pad_score !== undefined ? ` • Điểm tin cậy: ${(result.pad_score * 100).toFixed(1)}%` : ""}`
-                      : result.reason.includes("no face")
-                        ? "Đang tìm khuôn mặt trong vùng trung tâm ROI..."
+                      ? "Cảnh báo: Không thể xác thực khuôn mặt trực tiếp."
+                      : result.reason.includes("no face") || result.reason.includes("waiting")
+                        ? "Vui lòng nhìn thẳng vào camera trong khung nhận diện."
                         : `Trạng thái: ${result.reason}`)
-                  : "Hướng dẫn: Sinh viên bước vào vùng ROI trung tâm, mở mắt nhìn thẳng camera để xác thực."}
+                  : "Vui lòng nhìn thẳng vào camera để điểm danh."}
             </span>
           </div>
         </div>
 
         {/* CỘT THÔNG TIN PHẢN HỒI SINH VIÊN */}
         <div className="kiosk-sidebar-card">
-          <h2 className="kiosk-section-title">KẾT QUẢ ĐIỂM DANH VỪA GHI NHẬN</h2>
+          <h2 className="kiosk-section-title">KẾT QUẢ ĐIỂM DANH</h2>
 
           {lastCheckin ? (
             <div className="kiosk-student-card animated">
@@ -379,8 +408,8 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
                   {lastCheckin.student.name.charAt(0)}
                 </div>
                 <div>
-                  <span className={lastCheckin.created === false ? "kiosk-badge-warning" : "kiosk-badge-success"}>
-                    {lastCheckin.created === false ? "✓ ĐÃ ĐIỂM DANH TRƯỚC ĐÓ" : "✓ CÓ MẶT THÀNH CÔNG"}
+                  <span className={lastCheckin.created === false ? "kiosk-badge-info" : "kiosk-badge-success"}>
+                    {lastCheckin.created === false ? "✓ ĐÃ CÓ MẶT" : "✓ ĐIỂM DANH THÀNH CÔNG"}
                   </span>
                   <h3 className="kiosk-student-name">{lastCheckin.student.name}</h3>
                   <span className="kiosk-student-id">{lastCheckin.student.student_code}</span>
@@ -397,12 +426,12 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
                   <b>{studentClassName}</b>
                 </div>
                 <div className="detail-row">
-                  <span>Thời gian điểm danh:</span>
+                  <span>Thời gian:</span>
                   <b>{lastCheckin.time}</b>
                 </div>
                 <div className="detail-row">
-                  <span>Xác thực Anti-Spoof:</span>
-                  <b className="verified-text">MiniFASNetV2 (Hợp lệ)</b>
+                  <span>Trạng thái:</span>
+                  <b className="verified-text">Hợp lệ</b>
                 </div>
               </div>
             </div>
@@ -410,12 +439,11 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
             <div className="kiosk-waiting-card">
               <div className="radar-icon">◎</div>
               <p>Sẵn sàng nhận diện sinh viên tiếp theo</p>
-              <small>Hệ thống tự động đối chiếu vector 128D và kiểm tra chống giả mạo Deep Learning.</small>
             </div>
           )}
 
           <div className="kiosk-recent-list">
-            <h3>Danh sách điểm danh gần nhất (Phiên hiện tại)</h3>
+            <h3>Danh sách có mặt gần nhất</h3>
             <div className="kiosk-recent-table-wrap">
               <table>
                 <thead>

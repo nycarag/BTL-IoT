@@ -106,13 +106,12 @@ export default function CameraPanel({ api, devices, selectedSession, token, apiU
   const result = preview?.result;
   const wrongSession = Boolean(preview && (selectedSession ? Number(selectedSession) !== preview.config.session_id : false));
   const verified = hasSource && !wrongSession && preview?.config.active && preview.session_id === preview.config.session_id && result?.accepted === true && !paused;
-  const title = paused ? "Đã tạm dừng xem trước" : !hasSource ? "Chưa có ảnh camera mới" : wrongSession ? "Camera đang xử lý buổi học khác" : verified ? result?.created === false ? "Đã điểm danh trước đó" : "Điểm danh thành công" : result?.state === "processing" ? "Đang xử lý khuôn mặt…" : result?.state === "preview" ? "Xem trước · Chưa chạy điểm danh" : "Đang xác thực";
+  const title = paused ? "Đã tạm dừng xem trước" : !hasSource ? "Chưa có ảnh camera" : wrongSession ? "Camera đang xử lý buổi học khác" : verified ? result?.created === false ? "Đã có mặt trong buổi học" : "Điểm danh thành công" : result?.state === "processing" ? "Đang xử lý…" : result?.state === "preview" ? "Xem trước" : "Đang xác thực";
   const reason = result?.reason ? reasons[result.reason] ?? result.reason : "Đứng trong khung ROI và nhìn thẳng camera.";
   const roi = preview?.config;
-  // AI analyzes sampled frames, not necessarily the current live frame.
 
   return <section className={`panel camera-panel${expanded ? " camera-expanded" : ""}`}>
-    <div className="panel-head"><div><h2>Camera điểm danh</h2><small>Ảnh từ ESP32 · không mở thêm stream trên thiết bị</small></div><div className="actions"><button className="secondary" onClick={() => setPaused(!paused)}>{paused ? "Tiếp tục" : "Tạm dừng"}</button><button className="secondary" onClick={() => setExpanded(!expanded)}>{expanded ? "Thu gọn" : "Phóng to"}</button></div></div>
+    <div className="panel-head"><div><h2>Camera điểm danh</h2></div><div className="actions"><button className="secondary" onClick={() => setPaused(!paused)}>{paused ? "Tiếp tục" : "Tạm dừng"}</button><button className="secondary" onClick={() => setExpanded(!expanded)}>{expanded ? "Thu gọn" : "Phóng to"}</button></div></div>
     <label>Camera<select value={effectiveCamera} onChange={e => setCamera(e.target.value)} disabled={!devices.length}><option value="" disabled>Chưa có thiết bị</option>{devices.map(d => <option key={d.id} value={d.id}>{d.name} · {d.id}</option>)}</select></label>
     <div className="camera-layout">
       <div className="camera-view">
@@ -123,12 +122,11 @@ export default function CameraPanel({ api, devices, selectedSession, token, apiU
         {(!hasSource || paused) && (
           <div className="camera-placeholder">
             <strong>◎</strong>
-            <p>{paused ? "Xem trước đang tạm dừng" : "Đang chờ ảnh từ ESP32-CAM"}</p>
-            <small>Kết nối Wi-Fi ESP32 và chạy camera_bridge.py.<br />Đóng các trang /stream và ứng dụng đọc camera khác.</small>
+            <p>{paused ? "Xem trước đang tạm dừng" : "Đang chờ kết nối camera"}</p>
           </div>
         )}
       </div>
     </div>
-    <div className={`camera-result${verified ? " confirmed" : ""}`} aria-live="polite"><p className="eyebrow">{verified ? "✓ BACKEND ĐÃ XÁC NHẬN" : "TRẠNG THÁI CAMERA"}</p><h3>{title}</h3>{verified ? <p className="camera-student">{result?.student_code}</p> : <p>{error || reason}</p>}{preview?.received_at && hasSource && <small>Ảnh nhận lúc {new Date(preview.received_at).toLocaleTimeString("vi-VN")}</small>}{result?.pad_score !== undefined && <small>PAD real score: {result.pad_score.toFixed(3)}</small>}<hr /><small>{preview?.config.active ? `Camera được gán buổi #${preview.config.session_id}` : "Gán camera vào buổi đang mở ở Thiết bị & ROI để điểm danh."}</small><small>Video truyền độc lập với AI. Kết quả xác thực thuộc khung hình lấy mẫu gần nhất; ảnh chỉ giữ tạm trong RAM.</small>{paused && <small>Tạm dừng chỉ tắt màn hình xem trước; cầu nối và điểm danh vẫn hoạt động.</small>}</div>
+    <div className={`camera-result${verified ? " confirmed" : ""}`} aria-live="polite"><p className="eyebrow">{verified ? "KẾT QUẢ XÁC NHẬN" : "TRẠNG THÁI CAMERA"}</p><h3>{title}</h3>{verified ? <p className="camera-student">{result?.student_code}</p> : <p>{error || reason}</p>}{preview?.received_at && hasSource && <small>Nhận lúc {new Date(preview.received_at).toLocaleTimeString("vi-VN")}</small>}{result?.pad_score !== undefined && <small>Độ tin cậy: {(result.pad_score * 100).toFixed(1)}%</small>}<hr /><small>{preview?.config.active ? `Gán buổi học #${preview.config.session_id}` : "Camera chưa gán vào buổi học nào."}</small></div>
   </section>;
 }

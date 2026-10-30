@@ -40,11 +40,16 @@
 .roi-label{position:absolute;top:6px;left:8px;background:rgba(20,40,32,0.85);color:#4ade80;font-size:0.6rem;font-weight:700;padding:2px 8px;border-radius:4px;letter-spacing:0.05em}
 .roi-scanline{position:absolute;inset:0;background:linear-gradient(180deg,transparent 0%,rgba(74,222,128,0.25) 50%,transparent 100%);animation:kioskScan 2.5s ease-in-out infinite}
 @keyframes kioskScan{0%{transform:translateY(-100%)}100%{transform:translateY(100%)}}
+.brand-badge{display:inline-block;background:var(--accent);color:#fff;font-size:0.68rem;font-weight:700;letter-spacing:0.12em;padding:5px 12px;border-radius:6px;margin-bottom:12px}
 .kiosk-success-flash{position:absolute;inset:0;background:rgba(34,197,94,0.18);display:flex;align-items:center;justify-content:center;animation:fadeIn 0.3s ease}
-.kiosk-success-banner{background:#166534;color:#fff;padding:16px 28px;border-radius:12px;display:flex;align-items:center;gap:16px;box-shadow:0 12px 30px rgba(0,0,0,0.35);border:2px solid #4ade80}
-.kiosk-success-banner .check-icon{font-size:2rem;font-weight:900;color:#4ade80}
-.kiosk-success-banner h3{margin:0;font-size:1.2rem;font-weight:800}
-.kiosk-success-banner p{margin:4px 0 0;font-size:1rem;color:#bbf7d0}
+.kiosk-success-banner{background:#166534;color:#fff;padding:18px 30px;border-radius:12px;display:flex;align-items:center;gap:16px;box-shadow:0 12px 30px rgba(0,0,0,0.35);border:2px solid #4ade80}
+.kiosk-success-banner.existing{background:#0c4a6e;border-color:#38bdf8}
+.kiosk-success-banner.existing .check-icon{color:#38bdf8}
+.kiosk-success-banner .check-icon{font-size:2.2rem;font-weight:900;color:#4ade80}
+.kiosk-success-banner h3{margin:0;font-size:1.15rem;font-weight:800;letter-spacing:-0.01em}
+.kiosk-success-banner .student-highlight{margin:3px 0 0;font-size:1.35rem;font-weight:800;color:#fff}
+.kiosk-success-banner .student-subcode{margin:2px 0 0;font-size:0.85rem;color:#bbf7d0;display:block}
+.kiosk-success-banner.existing .student-subcode{color:#bae6fd}
 .kiosk-empty-view{color:#94a89f;text-align:center;padding:70px 20px}
 .kiosk-spinner{width:36px;height:36px;border:3px solid rgba(255,255,255,0.1);border-top-color:#4ade80;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -86,6 +91,7 @@
 .kiosk-session-badge.closed{background:#451a1a;color:#fca5a5;border-color:#ef4444}
 .kiosk-session-select{background:#111f1a;color:#d2e5dc;border:1px solid #2d4f40;padding:5px 10px;border-radius:6px;font-size:0.75rem;margin-left:8px;cursor:pointer}
 .kiosk-badge-warning{display:inline-block;background:#fef3c7;color:#b45309;font-size:0.65rem;font-weight:800;padding:3px 8px;border-radius:5px;margin-bottom:4px}
+.kiosk-badge-info{display:inline-block;background:#e0f2fe;color:#0284c7;font-size:0.65rem;font-weight:800;padding:3px 8px;border-radius:5px;margin-bottom:4px}
 
 /* ========================================================== */
 /* ENROLLMENT MODAL & WEBCAM STYLING                          */
