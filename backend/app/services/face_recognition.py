@@ -39,14 +39,16 @@ class FaceRecognitionAdapter:
         image = self.engine.load_image_file(io.BytesIO(image_bytes))
         if box is None:
             locations = self.engine.face_locations(image)
-            if len(locations) != 1:
-                raise ValueError("Enrollment requires exactly one face")
+            if len(locations) == 0:
+                raise ValueError("Không tìm thấy khuôn mặt trong ảnh. Vui lòng nhìn thẳng và đủ sáng.")
+            if len(locations) > 1:
+                raise ValueError(f"Phát hiện {len(locations)} khuôn mặt. Yêu cầu chỉ có 1 người trong khung hình.")
         else:
             x, y, w, h = box
             locations = [(y, x + w, y + h, x)]
         encodings = self.engine.face_encodings(image, locations)
         if len(encodings) != 1 or not np.isfinite(encodings[0]).all():
-            raise ValueError("Unable to encode face")
+            raise ValueError("Không thể trích xuất đặc trưng khuôn mặt từ ảnh.")
         return encodings[0]
 
     def recognize(self, image_bytes: bytes, box, db, class_id: int):

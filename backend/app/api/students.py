@@ -1,6 +1,7 @@
 import json
+import numpy as np
 
-from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -8,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.security import verify_token
 from app.database import get_db
 from app.models import Attendance, ClassRoom, Student
-from app.models.school import FaceReference
+from app.models.school import FaceReference, utcnow
 from app.schemas import StudentCreate, StudentResponse
 from app.services.face_recognition import FaceRecognitionAdapter
 from app.services.images import validate_image
@@ -44,7 +45,22 @@ def save_student(payload, db, student=None):
 
 @router.get("/students", response_model=list[StudentResponse])
 def list_students(_: str = Depends(verify_token), db: Session = Depends(get_db)):
-    return [student_response(s, db) for s in db.scalars(select(Student).order_by(Student.student_code))]
+    stmt = (
+        select(Student, FaceReference.student_id.is_not(None))
+        .outerjoin(FaceReference, Student.id == FaceReference.student_id)
+        .order_by(Student.student_code)
+    )
+    return [
+        dict(
+            id=s.id,
+            student_code=s.student_code,
+            name=s.name,
+            date_of_birth=s.date_of_birth,
+            class_id=s.class_id,
+            enrolled=bool(enrolled),
+        )
+        for s, enrolled in db.execute(stmt)
+    ]
 
 
 @router.post("/students", response_model=StudentResponse, status_code=201)
@@ -76,35 +92,62 @@ def delete_student(student_id: int, _: str = Depends(verify_token), db: Session 
 
 
 @router.post("/students/{student_id}/face")
-async def enroll_face(student_id: int, image: UploadFile, consent: bool = Form(...),
-                      username: str = Depends(verify_token), db: Session = Depends(get_db)):
+async def enroll_face(
+    student_id: int,
+    image: list[UploadFile] | UploadFile = File(...),
+    consent: bool = Form(...),
+    username: str = Depends(verify_token),
+    db: Session = Depends(get_db)
+):
     if not consent:
         raise HTTPException(422, "Explicit biometric consent is required")
     if db.get(Student, student_id) is None:
         raise HTTPException(404, "Student not found")
-    if image.content_type not in {"image/jpeg", "image/png"}:
-        raise HTTPException(415, "Only JPEG and PNG accepted")
-    body = await image.read(5 * 1024 * 1024 + 1)
-    if len(body) > 5 * 1024 * 1024:
-        raise HTTPException(413, "Image too large")
+    
+    file_list = image if isinstance(image, list) else [image]
+    if not file_list:
+        raise HTTPException(422, "Vui lòng chọn ít nhất một tệp ảnh chân dung")
+    if len(file_list) > 5:
+        raise HTTPException(422, "Chỉ được tải lên tối đa 5 ảnh chân dung")
+
     recognizer = FaceRecognitionAdapter()
     if recognizer.engine is None:
         raise HTTPException(503, recognizer.reason)
-    try:
-        validate_image(body)
-        vector = await run_in_threadpool(recognizer.encode, body)
-    except Exception:
-        raise HTTPException(422, "Image must contain exactly one clear face")
+
+    enc_list = []
+    for f in file_list:
+        if f.content_type not in {"image/jpeg", "image/png"}:
+            raise HTTPException(415, f"Tệp {f.filename or ''} không đúng định dạng. Chỉ chấp nhận JPEG và PNG.")
+        body = await f.read(5 * 1024 * 1024 + 1)
+        if len(body) > 5 * 1024 * 1024:
+            raise HTTPException(413, f"Ảnh {f.filename or ''} vượt quá dung lượng 5 MiB")
+        try:
+            validate_image(body)
+            vec = await run_in_threadpool(recognizer.encode, body)
+            enc_list.append(vec)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
+        except Exception as exc:
+            raise HTTPException(422, f"Lỗi xử lý ảnh {f.filename or ''}: {str(exc)}")
+
+    if not enc_list:
+        raise HTTPException(422, "Không trích xuất được vector khuôn mặt hợp lệ.")
+
+    # Tính vector trung bình chuẩn hóa nếu có nhiều mẫu ảnh (chuẩn nhận diện đa góc nhìn)
+    avg_vec = np.mean(enc_list, axis=0)
+    norm = np.linalg.norm(avg_vec)
+    if norm > 0:
+        avg_vec = avg_vec / norm
+
     reference = db.get(FaceReference, student_id)
     if reference is None:
         reference = FaceReference(student_id=student_id, enrolled_by=username, embedding="")
         db.add(reference)
-    from app.models.school import utcnow
-    reference.embedding = json.dumps(vector.tolist())
+    reference.embedding = json.dumps(avg_vec.tolist())
     reference.consent_at = utcnow()
     reference.enrolled_by = username
     db.commit()
-    return {"enrolled": True, "raw_image_stored": False}
+    return {"enrolled": True, "samples": len(enc_list), "raw_image_stored": False}
 
 
 @router.delete("/students/{student_id}/face", status_code=204)
