@@ -34,7 +34,7 @@ class PreviewStore:
             if not group:
                 self.listeners.pop(device_id, None)
 
-    def put(self, device_id, image, session_id=None):
+    def put(self, device_id, image, session_id=None, is_preview=False):
         self._expire()
         self.sequence += 1
         self.frames.pop(device_id, None)
@@ -42,6 +42,7 @@ class PreviewStore:
             "sequence": self.sequence, "time": time.monotonic(), "image": image,
             "received_at": datetime.now(timezone.utc).isoformat(),
             "session_id": session_id, "result": {"state": "processing" if session_id else "preview"},
+            "is_preview": is_preview,
         }
         while len(self.frames) > self.capacity:
             self.frames.popitem(last=False)
@@ -53,12 +54,16 @@ class PreviewStore:
         # Push-only firmware still has preview; a sampled older frame must not
         # replace an already flowing independent video frame.
         current = self.get(device_id)
-        if current is None or current["session_id"] is not None:
-            self.put(device_id, image, session_id)
+        now = time.monotonic()
+        is_preview_active = current is not None and (
+            current.get("is_preview") or current.get("session_id") is None
+        ) and (now - current["time"] < 2.0)
+        if not is_preview_active:
+            self.put(device_id, image, session_id, is_preview=False)
         self.sequence += 1
         sequence = self.sequence
         self.results[device_id] = {
-            "sequence": sequence, "time": time.monotonic(), "session_id": session_id,
+            "sequence": sequence, "time": now, "session_id": session_id,
             "result": {"state": "processing"},
         }
         self.results.move_to_end(device_id)

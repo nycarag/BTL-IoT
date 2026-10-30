@@ -31,7 +31,7 @@ class Settings:
     device_offline_seconds: int = int(os.getenv("DEVICE_OFFLINE_SECONDS", "60"))
     late_after_minutes: int = int(os.getenv("LATE_AFTER_MINUTES", "15"))
     frame_interval_seconds: float = float(os.getenv("FRAME_INTERVAL_SECONDS", "0.3"))
-    preview_max_fps: int = max(1, min(30, int(os.getenv("PREVIEW_MAX_FPS", "20"))))
+    preview_max_fps: int = max(1, min(60, int(os.getenv("PREVIEW_MAX_FPS", "30"))))
     pad_model_path: str = os.getenv("PAD_MODEL_PATH", DEFAULT_PAD_MODEL if os.path.exists(DEFAULT_PAD_MODEL) else "")
     pad_real_threshold: float = float(os.getenv("PAD_REAL_THRESHOLD", "0.45"))
     pad_crop_scale: float = float(os.getenv("PAD_CROP_SCALE", "2.7"))

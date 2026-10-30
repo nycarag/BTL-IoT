@@ -57,6 +57,7 @@ def heartbeat(payload: DeviceHeartbeat, x_device_token: str | None = Header(defa
     device.last_seen = datetime.now(timezone.utc)
     device.status = "online"
     db.commit()
+    _known_devices.add(x_device_id)
     return device
 
 
@@ -108,18 +109,22 @@ def set_config(device_id: str, payload: DeviceConfigInput, _: str = Depends(veri
 
 
 preview_uploads = {}
+_known_devices: set[str] = set()
 
 
 @router.post("/devices/{device_id}/preview", status_code=202)
 async def upload_preview(device_id: str, image: UploadFile,
                          x_device_token: str | None = Header(default=None), db: Session = Depends(get_db)):
     verify_device_token(x_device_token)
-    device = db.get(Device, device_id)
-    if device is None:
-        raise HTTPException(404, "Send heartbeat first")
+    if device_id not in _known_devices:
+        device = db.get(Device, device_id)
+        if device is None:
+            raise HTTPException(404, "Send heartbeat first")
+        _known_devices.add(device_id)
     now = time.monotonic()
-    if now - preview_uploads.get(device_id, -100) < 1 / settings.preview_max_fps:
-        raise HTTPException(429, "Preview rate exceeded")
+    min_gap = 1.0 / max(settings.preview_max_fps, 30)
+    if now - preview_uploads.get(device_id, -100) < min_gap:
+        return {"preview": True, "accepted": False, "skipped": True}
     if len(preview_uploads) > 256:
         preview_uploads.clear()
     preview_uploads[device_id] = now
@@ -128,11 +133,11 @@ async def upload_preview(device_id: str, image: UploadFile,
     body = await image.read(MAX_IMAGE_BYTES + 1)
     if len(body) > MAX_IMAGE_BYTES:
         raise HTTPException(413, "Image is too large")
-    try:
-        await run_in_threadpool(validate_image, body)
-    except ValueError as exc:
-        raise HTTPException(422, str(exc))
-    previews.put(device_id, body)
+    if len(body) < 64:
+        raise HTTPException(422, "Image is too small")
+    if not (body.startswith(b"\xff\xd8") or body.startswith(b"\x89PNG")):
+        raise HTTPException(422, "Only JPEG and PNG accepted")
+    previews.put(device_id, body, is_preview=True)
     # Heartbeat updates database separately; no SQLite write per preview frame.
     return {"preview": True, "accepted": False, "reason": "Preview only; no attendance processed"}
 

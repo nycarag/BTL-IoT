@@ -27,11 +27,12 @@ type Props = {
 export default function KioskView({ api, devices, selectedSession, onSelectSession, token, apiUrl, students, classes, rows, sessions }: Props) {
   const [camera, setCamera] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
-  const [source, setSource] = useState("");
+  const [hasSource, setHasSource] = useState(false);
   const [error, setError] = useState("");
   const [lastCheckin, setLastCheckin] = useState<{ student: Student; time: string; score?: number; created?: boolean } | null>(null);
   const effectiveCamera = devices.some(d => d.id === camera) ? camera : devices[0]?.id ?? "";
   const lastAcceptedRef = useRef<string>("");
+  const imgRef = useRef<HTMLImageElement>(null);
 
   const studentsRef = useRef(students);
   studentsRef.current = students;
@@ -106,7 +107,11 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
     let stopped = false; let timer: number; let reconnect: number; let objectUrl = "";
     let socket: WebSocket; let lastImage = Date.now();
     const controller = new AbortController();
-    const release = () => { if (objectUrl) URL.revokeObjectURL(objectUrl); objectUrl = ""; };
+    const release = () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      objectUrl = "";
+      if (imgRef.current) imgRef.current.src = "";
+    };
 
     const connect = () => {
       const url = new URL(`/ws/devices/${encodeURIComponent(effectiveCamera)}/camera`, apiUrl || window.location.origin);
@@ -115,7 +120,6 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
       socket.onopen = () => socket.send(JSON.stringify({ token }));
       socket.onmessage = async event => {
         if (typeof event.data === "string") {
-          // Nhịp tim/giữ kết nối từ backend: Giữ nguyên khung hình hiện tại, KHÔNG xóa source gây chớp giật
           return;
         }
         const currentSocket = socket;
@@ -123,20 +127,31 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
         const image = new Image(); image.src = nextUrl;
         try {
           await image.decode();
-          if (stopped || currentSocket !== socket) { URL.revokeObjectURL(nextUrl); return; }
-          const oldUrl = objectUrl; objectUrl = nextUrl; setSource(nextUrl); setError(""); lastImage = Date.now();
-          requestAnimationFrame(() => {
-            if (oldUrl) URL.revokeObjectURL(oldUrl);
-            if (!stopped && currentSocket.readyState === WebSocket.OPEN) currentSocket.send("next");
-          });
+          if (stopped || currentSocket !== socket) {
+            URL.revokeObjectURL(nextUrl);
+            return;
+          }
+          const oldUrl = objectUrl;
+          objectUrl = nextUrl;
+          if (imgRef.current) {
+            imgRef.current.src = nextUrl;
+          }
+          setHasSource(true);
+          setError("");
+          lastImage = Date.now();
+          if (oldUrl) URL.revokeObjectURL(oldUrl);
+          if (!stopped && currentSocket.readyState === WebSocket.OPEN) {
+            currentSocket.send("next");
+          }
         } catch {
           URL.revokeObjectURL(nextUrl);
-          if (!stopped && currentSocket.readyState === WebSocket.OPEN) currentSocket.send("next");
+          if (!stopped && currentSocket.readyState === WebSocket.OPEN) {
+            currentSocket.send("next");
+          }
         }
       };
       socket.onclose = event => {
         if (stopped) return;
-        // Giữ lại khung hình gần nhất trên màn hình, không xóa source gây giật màn hình
         setError(event.code === 4401 ? "Phiên xem camera hết hạn — đăng nhập lại" : "Đang kết nối lại luồng camera…");
         if (event.code !== 4401) reconnect = window.setTimeout(connect, 1000);
       };
@@ -152,7 +167,7 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
           // Chỉ xóa source khi camera mất tín hiệu hoàn toàn quá 15 giây
           if (Date.now() - lastImage > 15000 && !metadata.available) {
             release();
-            setSource("");
+            setHasSource(false);
           }
 
           // Kích hoạt phản hồi khi nhận diện thành công
@@ -263,8 +278,8 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
         <div className="kiosk-camera-card">
           <div className="kiosk-camera-topbar">
             <div className="kiosk-status-pill">
-              <span className={`kiosk-dot ${source ? "live" : "offline"}`}></span>
-              <span>{source ? `CAMERA ONLINE (${deviceDisplayName})` : "ĐANG CHỜ KẾT NỐI CAMERA"}</span>
+              <span className={`kiosk-dot ${hasSource ? "live" : "offline"}`}></span>
+              <span>{hasSource ? `CAMERA ONLINE (${deviceDisplayName})` : "ĐANG CHỜ KẾT NỐI CAMERA"}</span>
             </div>
             <div className="kiosk-fas-badge">
               <span>🛡️ FAS: MiniFASNetV2 + ResNet-34 ACTIVE</span>
@@ -279,55 +294,54 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
           </div>
 
           <div className="kiosk-viewport">
-            {source ? (
-              <div className="kiosk-image-wrapper">
-                <img src={source} alt="Stream Kiosk" />
-                {roi && (
-                  <div
-                    className="kiosk-roi-box"
-                    style={{
-                      left: `${roi.roi_left * 100}%`,
-                      top: `${roi.roi_top * 100}%`,
-                      width: `${(roi.roi_right - roi.roi_left) * 100}%`,
-                      height: `${(roi.roi_bottom - roi.roi_top) * 100}%`
-                    }}
-                  >
-                    <div className="roi-corner top-left"></div>
-                    <div className="roi-corner top-right"></div>
-                    <div className="roi-corner bottom-left"></div>
-                    <div className="roi-corner bottom-right"></div>
-                    <span className="roi-label">VÙNG ĐIỂM DANH TRUNG TÂM</span>
-                    <div className="roi-scanline"></div>
-                  </div>
-                )}
-                {/* Khung chữ nhật bám theo khuôn mặt nhận diện (Face Bounding Box) */}
-                {result?.box && result?.frame_size && (
-                  <div
-                    className={`kiosk-face-box ${result.accepted ? "verified" : result.reason?.includes("spoof") ? "spoof" : "scanning"}`}
-                    style={{
-                      left: `${(result.box[0] / result.frame_size[0]) * 100}%`,
-                      top: `${(result.box[1] / result.frame_size[1]) * 100}%`,
-                      width: `${(result.box[2] / result.frame_size[0]) * 100}%`,
-                      height: `${(result.box[3] / result.frame_size[1]) * 100}%`,
-                    }}
-                  >
-                    <span className="face-tag">{result.student_code || (result.accepted ? "XÁC THỰC" : "NHẬN DIỆN")}</span>
-                  </div>
-                )}
-                {/* Overlay khi nhận diện thành công */}
-                {result?.accepted && (
-                  <div className="kiosk-success-flash">
-                    <div className="kiosk-success-banner" style={result.created === false ? { background: "rgba(37, 99, 235, 0.95)" } : undefined}>
-                      <span className="check-icon">✓</span>
-                      <div>
-                        <h3>{result.created === false ? "ĐÃ ĐIỂM DANH TRƯỚC ĐÓ" : "XÁC THỰC THÀNH CÔNG"}</h3>
-                        <p>{result.student_code}</p>
-                      </div>
+            <div className="kiosk-image-wrapper" style={{ display: hasSource ? "block" : "none" }}>
+              <img ref={imgRef} alt="Stream Kiosk" />
+              {roi && (
+                <div
+                  className="kiosk-roi-box"
+                  style={{
+                    left: `${roi.roi_left * 100}%`,
+                    top: `${roi.roi_top * 100}%`,
+                    width: `${(roi.roi_right - roi.roi_left) * 100}%`,
+                    height: `${(roi.roi_bottom - roi.roi_top) * 100}%`
+                  }}
+                >
+                  <div className="roi-corner top-left"></div>
+                  <div className="roi-corner top-right"></div>
+                  <div className="roi-corner bottom-left"></div>
+                  <div className="roi-corner bottom-right"></div>
+                  <span className="roi-label">VÙNG ĐIỂM DANH TRUNG TÂM</span>
+                  <div className="roi-scanline"></div>
+                </div>
+              )}
+              {/* Khung chữ nhật bám theo khuôn mặt nhận diện (Face Bounding Box) */}
+              {result?.box && result?.frame_size && (
+                <div
+                  className={`kiosk-face-box ${result.accepted ? "verified" : result.reason?.includes("spoof") ? "spoof" : "scanning"}`}
+                  style={{
+                    left: `${(result.box[0] / result.frame_size[0]) * 100}%`,
+                    top: `${(result.box[1] / result.frame_size[1]) * 100}%`,
+                    width: `${(result.box[2] / result.frame_size[0]) * 100}%`,
+                    height: `${(result.box[3] / result.frame_size[1]) * 100}%`,
+                  }}
+                >
+                  <span className="face-tag">{result.student_code || (result.accepted ? "XÁC THỰC" : "NHẬN DIỆN")}</span>
+                </div>
+              )}
+              {/* Overlay khi nhận diện thành công */}
+              {result?.accepted && (
+                <div className="kiosk-success-flash">
+                  <div className="kiosk-success-banner" style={result.created === false ? { background: "rgba(37, 99, 235, 0.95)" } : undefined}>
+                    <span className="check-icon">✓</span>
+                    <div>
+                      <h3>{result.created === false ? "ĐÃ ĐIỂM DANH TRƯỚC ĐÓ" : "XÁC THỰC THÀNH CÔNG"}</h3>
+                      <p>{result.student_code}</p>
                     </div>
                   </div>
-                )}
-              </div>
-            ) : (
+                </div>
+              )}
+            </div>
+            {!hasSource && (
               <div className="kiosk-empty-view">
                 <div className="kiosk-spinner"></div>
                 <p>Đang kết nối luồng camera từ ESP32-CAM / Webcam...</p>

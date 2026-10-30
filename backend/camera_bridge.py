@@ -139,6 +139,7 @@ class CameraBridge:
             self.cap = cv2.VideoCapture(self.webcam_id)
             if not self.cap.isOpened():
                 raise ValueError(f"Cannot open webcam ID {self.webcam_id}")
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         else:
             for value in (camera_url, backend_url):
                 parsed = urlparse(value)
@@ -229,13 +230,20 @@ class CameraBridge:
         mode = os.getenv("CAMERA_TRANSPORT", "mjpeg")
         if mode not in {"mjpeg", "snapshot"}:
             raise ValueError("CAMERA_TRANSPORT must be mjpeg or snapshot")
-        fps = max(1, min(30, float(os.getenv("CAMERA_PREVIEW_FPS", "15"))))
+        default_fps = "30" if self.cap is not None else "25"
+        fps = max(1, min(60, float(os.getenv("CAMERA_PREVIEW_FPS", default_fps))))
         prefix = "/devices/" + quote(self.device_id, safe="")
 
         def reader():
             while not stop.is_set():
                 try:
-                    if self.cap is not None or mode == "snapshot":
+                    if self.cap is not None:
+                        start_cap = time.monotonic()
+                        latest.put(self.capture())
+                        elapsed = time.monotonic() - start_cap
+                        if elapsed < 1 / fps:
+                            stop.wait(1 / fps - elapsed)
+                    elif mode == "snapshot":
                         latest.put(self.capture())
                         stop.wait(1 / fps)
                     else:
@@ -248,7 +256,7 @@ class CameraBridge:
                                     return
                 except (OSError, ValueError, http.client.HTTPException) as exc:
                     LOG.warning("Camera read failed (%s): %s", mode, exc)
-                    stop.wait(1)
+                    stop.wait(0.5)
 
         def preview_worker():
             backend = BackendConnection(self.backend_url, self.token, self.device_id, self.timeout)
@@ -269,8 +277,8 @@ class CameraBridge:
                         backend.image(prefix + "/preview", image)
                     except (OSError, ValueError, http.client.HTTPException) as exc:
                         heartbeat = 0
-                        LOG.warning("Preview upload failed: %s", exc)
-                        stop.wait(1)
+                        LOG.debug("Preview upload skipped: %s", exc)
+                        stop.wait(0.04)
                     stop.wait(max(0, 1 / fps - (time.monotonic() - start)))
             finally:
                 backend.close()
@@ -307,7 +315,7 @@ class CameraBridge:
                     except (OSError, ValueError, AttributeError, http.client.HTTPException) as exc:
                         config, next_config = {}, 0
                         LOG.warning("AI request not accepted: %s", exc)
-                        stop.wait(1)
+                        stop.wait(0.2)
                     stop.wait(max(0, self.interval - (time.monotonic() - start)))
             finally:
                 backend.close()

@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.security import HTTPAuthorizationCredentials
@@ -57,8 +58,11 @@ async def camera_stream(websocket: WebSocket, device_id: str, db: Session = Depe
         db.rollback()
         listener = previews.subscribe(device_id)
         sequence = -1
+        last_auth_check = time.monotonic()
         while True:
-            verify_token(credentials)
+            if time.monotonic() - last_auth_check > 60:
+                verify_token(credentials)
+                last_auth_check = time.monotonic()
             listener.clear()
             frame = previews.get(device_id)
             if frame and frame["sequence"] != sequence:

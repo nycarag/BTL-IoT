@@ -21,20 +21,25 @@ const reasons: Record<string, string> = {
 export default function CameraPanel({ api, devices, selectedSession, token, apiUrl }: Props) {
   const [camera, setCamera] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
-  const [source, setSource] = useState("");
+  const [hasSource, setHasSource] = useState(false);
   const [error, setError] = useState("");
   const [paused, setPaused] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const effectiveCamera = devices.some(d => d.id === camera) ? camera : devices[0]?.id ?? "";
   const apiRef = useRef(api);
   apiRef.current = api;
+  const imgRef = useRef<HTMLImageElement>(null);
 
   useEffect(() => {
     if (!effectiveCamera || paused) return;
     let stopped = false; let timer: number; let reconnect: number; let objectUrl = "";
     let socket: WebSocket; let lastImage = Date.now();
     const controller = new AbortController();
-    const release = () => { if (objectUrl) URL.revokeObjectURL(objectUrl); objectUrl = ""; };
+    const release = () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      objectUrl = "";
+      if (imgRef.current) imgRef.current.src = "";
+    };
     const connect = () => {
       const url = new URL(`/ws/devices/${encodeURIComponent(effectiveCamera)}/camera`, apiUrl || window.location.origin);
       url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
@@ -49,15 +54,27 @@ export default function CameraPanel({ api, devices, selectedSession, token, apiU
         const image = new Image(); image.src = nextUrl;
         try {
           await image.decode();
-          if (stopped || currentSocket !== socket) { URL.revokeObjectURL(nextUrl); return; }
-          const oldUrl = objectUrl; objectUrl = nextUrl; setSource(nextUrl); setError(""); lastImage = Date.now();
-          requestAnimationFrame(() => {
-            if (oldUrl) URL.revokeObjectURL(oldUrl);
-            if (!stopped && currentSocket.readyState === WebSocket.OPEN) currentSocket.send("next");
-          });
+          if (stopped || currentSocket !== socket) {
+            URL.revokeObjectURL(nextUrl);
+            return;
+          }
+          const oldUrl = objectUrl;
+          objectUrl = nextUrl;
+          if (imgRef.current) {
+            imgRef.current.src = nextUrl;
+          }
+          setHasSource(true);
+          setError("");
+          lastImage = Date.now();
+          if (oldUrl) URL.revokeObjectURL(oldUrl);
+          if (!stopped && currentSocket.readyState === WebSocket.OPEN) {
+            currentSocket.send("next");
+          }
         } catch {
           URL.revokeObjectURL(nextUrl);
-          if (!stopped && currentSocket.readyState === WebSocket.OPEN) currentSocket.send("next");
+          if (!stopped && currentSocket.readyState === WebSocket.OPEN) {
+            currentSocket.send("next");
+          }
         }
       };
       socket.onclose = event => {
@@ -73,7 +90,10 @@ export default function CameraPanel({ api, devices, selectedSession, token, apiU
         const metadata: Preview = await (await apiRef.current(path, { signal: controller.signal, cache: "no-store" })).json();
         if (!stopped) {
           setPreview(metadata);
-          if (Date.now() - lastImage > 15000 && !metadata.available) { release(); setSource(""); }
+          if (Date.now() - lastImage > 15000 && !metadata.available) {
+            release();
+            setHasSource(false);
+          }
         }
       } catch (e) {
         if (!stopped) { setError(e instanceof Error ? e.message : "Mất kết nối ảnh camera"); }
@@ -85,8 +105,8 @@ export default function CameraPanel({ api, devices, selectedSession, token, apiU
 
   const result = preview?.result;
   const wrongSession = Boolean(preview && (selectedSession ? Number(selectedSession) !== preview.config.session_id : false));
-  const verified = source && !wrongSession && preview?.config.active && preview.session_id === preview.config.session_id && result?.accepted === true && !paused;
-  const title = paused ? "Đã tạm dừng xem trước" : !source ? "Chưa có ảnh camera mới" : wrongSession ? "Camera đang xử lý buổi học khác" : verified ? result?.created === false ? "Đã điểm danh trước đó" : "Điểm danh thành công" : result?.state === "processing" ? "Đang xử lý khuôn mặt…" : result?.state === "preview" ? "Xem trước · Chưa chạy điểm danh" : "Đang xác thực";
+  const verified = hasSource && !wrongSession && preview?.config.active && preview.session_id === preview.config.session_id && result?.accepted === true && !paused;
+  const title = paused ? "Đã tạm dừng xem trước" : !hasSource ? "Chưa có ảnh camera mới" : wrongSession ? "Camera đang xử lý buổi học khác" : verified ? result?.created === false ? "Đã điểm danh trước đó" : "Điểm danh thành công" : result?.state === "processing" ? "Đang xử lý khuôn mặt…" : result?.state === "preview" ? "Xem trước · Chưa chạy điểm danh" : "Đang xác thực";
   const reason = result?.reason ? reasons[result.reason] ?? result.reason : "Đứng trong khung ROI và nhìn thẳng camera.";
   const roi = preview?.config;
   // AI analyzes sampled frames, not necessarily the current live frame.
@@ -94,7 +114,21 @@ export default function CameraPanel({ api, devices, selectedSession, token, apiU
   return <section className={`panel camera-panel${expanded ? " camera-expanded" : ""}`}>
     <div className="panel-head"><div><h2>Camera điểm danh</h2><small>Ảnh từ ESP32 · không mở thêm stream trên thiết bị</small></div><div className="actions"><button className="secondary" onClick={() => setPaused(!paused)}>{paused ? "Tiếp tục" : "Tạm dừng"}</button><button className="secondary" onClick={() => setExpanded(!expanded)}>{expanded ? "Thu gọn" : "Phóng to"}</button></div></div>
     <label>Camera<select value={effectiveCamera} onChange={e => setCamera(e.target.value)} disabled={!devices.length}><option value="" disabled>Chưa có thiết bị</option>{devices.map(d => <option key={d.id} value={d.id}>{d.name} · {d.id}</option>)}</select></label>
-    <div className="camera-layout"><div className="camera-view">{source && !paused ? <div className="camera-image-wrap"><img src={source} alt="Ảnh hiện tại từ camera điểm danh" onError={() => { setSource(""); setError("Không đọc được ảnh camera"); }} />{roi && <div className="camera-roi" style={{ left: `${roi.roi_left * 100}%`, top: `${roi.roi_top * 100}%`, width: `${(roi.roi_right - roi.roi_left) * 100}%`, height: `${(roi.roi_bottom - roi.roi_top) * 100}%` }}><span>VÙNG ĐIỂM DANH</span></div>}</div> : <div className="camera-placeholder"><strong>◎</strong><p>{paused ? "Xem trước đang tạm dừng" : "Đang chờ ảnh từ ESP32-CAM"}</p><small>Kết nối Wi-Fi ESP32 và chạy camera_bridge.py.<br />Đóng các trang /stream và ứng dụng đọc camera khác.</small></div>}</div>
-    <div className={`camera-result${verified ? " confirmed" : ""}`} aria-live="polite"><p className="eyebrow">{verified ? "✓ BACKEND ĐÃ XÁC NHẬN" : "TRẠNG THÁI CAMERA"}</p><h3>{title}</h3>{verified ? <p className="camera-student">{result?.student_code}</p> : <p>{error || reason}</p>}{preview?.received_at && source && <small>Ảnh nhận lúc {new Date(preview.received_at).toLocaleTimeString("vi-VN")}</small>}{result?.pad_score !== undefined && <small>PAD real score: {result.pad_score.toFixed(3)}</small>}<hr /><small>{preview?.config.active ? `Camera được gán buổi #${preview.config.session_id}` : "Gán camera vào buổi đang mở ở Thiết bị & ROI để điểm danh."}</small><small>Video truyền độc lập với AI. Kết quả xác thực thuộc khung hình lấy mẫu gần nhất; ảnh chỉ giữ tạm trong RAM.</small>{paused && <small>Tạm dừng chỉ tắt màn hình xem trước; cầu nối và điểm danh vẫn hoạt động.</small>}</div></div>
+    <div className="camera-layout">
+      <div className="camera-view">
+        <div className="camera-image-wrap" style={{ display: hasSource && !paused ? "block" : "none" }}>
+          <img ref={imgRef} alt="Ảnh hiện tại từ camera điểm danh" onError={() => { setHasSource(false); setError("Không đọc được ảnh camera"); }} />
+          {roi && <div className="camera-roi" style={{ left: `${roi.roi_left * 100}%`, top: `${roi.roi_top * 100}%`, width: `${(roi.roi_right - roi.roi_left) * 100}%`, height: `${(roi.roi_bottom - roi.roi_top) * 100}%` }}><span>VÙNG ĐIỂM DANH</span></div>}
+        </div>
+        {(!hasSource || paused) && (
+          <div className="camera-placeholder">
+            <strong>◎</strong>
+            <p>{paused ? "Xem trước đang tạm dừng" : "Đang chờ ảnh từ ESP32-CAM"}</p>
+            <small>Kết nối Wi-Fi ESP32 và chạy camera_bridge.py.<br />Đóng các trang /stream và ứng dụng đọc camera khác.</small>
+          </div>
+        )}
+      </div>
+    </div>
+    <div className={`camera-result${verified ? " confirmed" : ""}`} aria-live="polite"><p className="eyebrow">{verified ? "✓ BACKEND ĐÃ XÁC NHẬN" : "TRẠNG THÁI CAMERA"}</p><h3>{title}</h3>{verified ? <p className="camera-student">{result?.student_code}</p> : <p>{error || reason}</p>}{preview?.received_at && hasSource && <small>Ảnh nhận lúc {new Date(preview.received_at).toLocaleTimeString("vi-VN")}</small>}{result?.pad_score !== undefined && <small>PAD real score: {result.pad_score.toFixed(3)}</small>}<hr /><small>{preview?.config.active ? `Camera được gán buổi #${preview.config.session_id}` : "Gán camera vào buổi đang mở ở Thiết bị & ROI để điểm danh."}</small><small>Video truyền độc lập với AI. Kết quả xác thực thuộc khung hình lấy mẫu gần nhất; ảnh chỉ giữ tạm trong RAM.</small>{paused && <small>Tạm dừng chỉ tắt màn hình xem trước; cầu nối và điểm danh vẫn hoạt động.</small>}</div>
   </section>;
 }
