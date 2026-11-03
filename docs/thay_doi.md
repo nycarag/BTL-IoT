@@ -570,6 +570,40 @@ Module điều khiển và kiểm thử được port có chọn lọc từ repo
 - Backend Tests: `PYTHONPATH=backend pytest backend/tests -q` $\rightarrow$ **97 passed, 3 warnings in 13.88s** (100% test suite vượt qua).
 - Frontend Build: `npm run build` $\rightarrow$ **Thành công 100% (0 lỗi TypeScript)**.
 
+## [2026-11-03] TASK T12: Kiểm thử đầu-cuối (E2E) trên backend thật với dữ liệu ảnh thực tế
+
+### Bối cảnh & Mục tiêu
+Thực hiện đợt kiểm thử tích hợp đầu-cuối (End-to-End) toàn diện trên quy trình nghiệp vụ thực tế của hệ thống: từ khởi động máy chủ Uvicorn độc lập, xác thực Admin JWT, quản lý danh mục (lớp học, sinh viên), đăng ký khuôn mặt trích xuất vector dlib 128D đa mẫu/đơn mẫu, quản lý phiên điểm danh và thiết bị, chạy pipeline phát hiện khuôn mặt YuNet + chống giả mạo MiniFASNet + kiểm soát chớp mắt thích ứng EAR trên luồng preview, truyền phát video WebSocket kèm ACK "next", cho đến xuất báo cáo CSV điểm danh.
+
+### Nguồn dữ liệu kiểm thử
+- Ảnh mẫu công khai: chân dung Barack Obama (`obama.jpg`, `obama2.jpg`, bản CIF `obama_cif.jpg`), chân dung Joe Biden (`biden.jpg`), và ảnh giả mạo màn hình/ảnh in `image_F1.jpg` của Minivision.
+- Môi trường kiểm thử độc lập: chạy uvicorn trên cổng 8765 với database SQLite tạm tại `scratchpad/work/e2e_data`. Toàn bộ dữ liệu tạm và tiến trình nền đã được dọn dẹp sạch sẽ sau kiểm thử.
+
+### Danh mục tệp thay đổi
+
+| Tệp thay đổi | Loại thao tác | Mô tả chi tiết | Mục đích / Tác động |
+|---|---|---|---|
+| `docs/test-report.md` | Chỉnh sửa | Bổ sung mục "Kiểm thử E2E 11/2026" gồm bảng tổng hợp 14 bước kiểm thử từ API auth, đăng ký đa mẫu, cổng liveness blink, nhận diện đa người, chống giả mạo PAD, WebSocket binary stream, đến tệp CSV xuất khẩu thực tế. | Cung cấp báo cáo thẩm định thực nghiệm toàn diện trên backend thật. |
+| `docs/thay_doi.md` | Chỉnh sửa | Ghi nhận chi tiết kết quả thực hiện Task T12. | Nhật ký phát triển hệ thống. |
+
+### Kết quả đo nghiệm E2E thực tế
+
+1. **Khả năng nhận diện danh tính:**
+   - `SV_OBAMA` (đăng ký đa mẫu 2 ảnh): khoảng cách cosine đo được khi so khớp frame CIF `obama_cif.jpg` là **0.5001** (< ngưỡng mặc định 0.52) $\rightarrow$ Điểm danh thành công.
+   - `SV_BIDEN` (đăng ký đơn mẫu 1 ảnh): khoảng cách cosine đo được là **0.4102** $\rightarrow$ Điểm danh thành công.
+2. **Khả năng chống giả mạo PAD:**
+   - Ảnh thật (`obama_cif.jpg`, `biden.jpg`): điểm số PAD đạt **0.9999** (> ngưỡng 0.45).
+   - Ảnh giả mạo (`image_F1.jpg`): điểm số PAD chỉ đạt **0.0180** (< ngưỡng 0.45) $\rightarrow$ Bị từ chối tự động với lý do `"spoof or uncertain PAD score"`.
+3. **Cổng kiểm soát liveness (EAR Blink):**
+   - Khi `LIVENESS_MODE=blink`: Frame tĩnh `obama_cif.jpg` bị chặn với lý do `"liveness: blink required"` sau khi đã qua bước kiểm tra độ ổn định khuôn mặt 3 frame.
+4. **Luồng WebSocket & Xuất CSV:**
+   - Giao thức WebSocket Camera đẩy metadata JSON và binary JPEG khung hình đúng nhịp ACK `"next"`.
+   - API xuất CSV điểm danh trích xuất chính xác 2 bản ghi với đầy đủ thông tin mã sinh viên, thời gian, tên thiết bị và audit log xác thực (`face+pad:...;distance:...`).
+
+### Kết quả kiểm thử tự động hồi quy
+- Lệnh: `PYTHONPATH=backend pytest backend/tests -q`
+- Kết quả: **97 passed, 3 warnings** (100% test suite vượt qua).
+
 
 
 
