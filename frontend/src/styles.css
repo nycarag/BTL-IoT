@@ -185,4 +185,102 @@
 .consent-box .check{margin:0 0 6px 0;font-size:0.78rem;line-height:1.4}
 .modal-actions{display:flex;align-items:center;padding-top:14px;border-top:1px solid var(--line)}
 
+/* Bảng điều khiển Camera Bridge */
+.bridge-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+.bridge-stat-item {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.bridge-stat-item small {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.05em;
+}
+.bridge-stat-item strong {
+  font-size: 1.05rem;
+  color: var(--ink);
+}
+.bridge-stat-item span {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.bridge-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 16px;
+  background: #f8faf6;
+  border: 1px solid #e2ece0;
+  border-radius: 10px;
+}
+.bridge-esp-url label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.bridge-esp-url input {
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 0.85rem;
+}
+.bridge-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.bridge-buttons button {
+  padding: 9px 18px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  border-radius: 6px;
+}
+.bridge-stderr-box {
+  margin-top: 16px;
+  background: #0f1715;
+  border: 1px solid #243b32;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.bridge-stderr-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 14px;
+  background: #14241f;
+  color: #94a89f;
+  font-size: 0.75rem;
+  border-bottom: 1px solid #243b32;
+}
+.bridge-stderr-content {
+  margin: 0;
+  padding: 12px 14px;
+  color: #fca5a5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  max-height: 180px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+
 

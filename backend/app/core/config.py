@@ -67,6 +67,9 @@ class Settings:
     liveness_max_hz: float = float(os.getenv("LIVENESS_MAX_HZ", "10.0"))
     recognition_calibrated: bool = os.getenv("RECOGNITION_CALIBRATED", "true").lower() == "true"
     pad_calibrated: bool = os.getenv("PAD_CALIBRATED", "true").lower() == "true"
+    default_camera_url: str = os.getenv("CAMERA_CAPTURE_URL", "http://192.168.4.1/capture")
+    bridge_device_id: str = os.getenv("CAMERA_DEVICE_ID", "esp32-cam-01")
+    backend_port: int = int(os.getenv("BACKEND_PORT", "8000"))
     cors_origins: tuple[str, ...] = tuple(
         origin.strip() for origin in os.getenv(
             "CORS_ORIGINS",

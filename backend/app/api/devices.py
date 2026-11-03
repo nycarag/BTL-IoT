@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import logging
 
@@ -7,7 +8,9 @@ from starlette.concurrency import run_in_threadpool
 
 from fastapi import APIRouter, Depends, Header, HTTPException, UploadFile
 from fastapi.responses import Response
+from pydantic import BaseModel, Field
 
+from app.services.bridge_control import bridge
 from app.services.camera_preview import previews
 from app.services.images import MAX_IMAGE_BYTES, validate_image
 from sqlalchemy import select
@@ -22,7 +25,21 @@ from app.schemas import DeviceHeartbeat, DeviceResponse
 from app.schemas.api import DeviceConfigInput
 from app.services.stability import gate
 
-router = APIRouter()
+
+@asynccontextmanager
+async def devices_lifespan(app):
+    try:
+        yield
+    finally:
+        bridge.stop()
+
+
+router = APIRouter(lifespan=devices_lifespan)
+
+
+class BridgeStartRequest(BaseModel):
+    source: str = Field(default="webcam", description="Camera source type: webcam or esp32")
+    camera_url: str | None = Field(default=None, description="Optional ESP32 snapshot URL")
 
 
 def config_response(device_id, db):
@@ -195,3 +212,43 @@ def preview_image(device_id: str, _: str = Depends(verify_token)):
     image = frame["image"]
     return Response(image, media_type="image/png" if image.startswith(b"\x89PNG") else "image/jpeg",
                     headers={"Cache-Control": "no-store, private", "X-Content-Type-Options": "nosniff"})
+
+
+@router.get("/bridge/status")
+def get_bridge_status(_: str = Depends(verify_token)):
+    return bridge.status()
+
+
+@router.post("/bridge/start")
+def start_bridge(payload: BridgeStartRequest = BridgeStartRequest(), _: str = Depends(verify_token)):
+    try:
+        return bridge.start(source=payload.source, camera_url=payload.camera_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except OSError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Backend không kết nối được camera: {exc}. Kiểm tra Wi-Fi/IP; nếu Docker không truy cập được SoftAP, hãy chạy camera_bridge.py trên host hoặc dùng camera laptop.",
+        )
+
+
+@router.post("/bridge/stop")
+def stop_bridge(_: str = Depends(verify_token)):
+    return bridge.stop()
+
+
+@router.get("/camera-bridge/status", include_in_schema=False)
+def get_camera_bridge_status(_: str = Depends(verify_token)):
+    return bridge.status()
+
+
+@router.post("/camera-bridge/start", include_in_schema=False)
+def start_camera_bridge(payload: BridgeStartRequest = BridgeStartRequest(), _: str = Depends(verify_token)):
+    return start_bridge(payload, _)
+
+
+@router.post("/camera-bridge/stop", include_in_schema=False)
+def stop_camera_bridge(_: str = Depends(verify_token)):
+    return bridge.stop()

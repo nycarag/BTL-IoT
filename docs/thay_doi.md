@@ -520,6 +520,32 @@ Sau khi Task T10 nâng cấp firmware tách cổng theo chuẩn CameraWebServer 
 ### Kết quả kiểm thử tự động
 - `PYTHONPATH=backend pytest backend/tests -q`: **82 passed, 3 warnings in 14.40s** (tăng thêm 1 test case mới, 100% test suite đạt chuẩn).
 
+## [2026-11-03] TASK T11: Điều khiển Bật/Tắt Camera Bridge từ Giao diện Web (Port chọn lọc từ repo bạn dtkien205)
+
+### Bối cảnh & Mục tiêu
+Trước đây, người dùng phải mở terminal riêng biệt để chạy các script shell hoặc lệnh Python `camera_bridge.py`. Để tối ưu hóa trải nghiệm giảng viên và quản trị viên, Task T11 triển khai tính năng điều khiển bật/tắt camera bridge trực tiếp từ giao diện web dashboard (tab **Thiết bị & vùng điểm danh**), hỗ trợ cả Webcam laptop và ESP32-CAM qua Wi-Fi.
+
+### Nguồn gốc tham khảo
+Module điều khiển và kiểm thử được port có chọn lọc từ repository của thành viên **dtkien205** (cùng nhóm nghiên cứu, cùng nguồn gốc dự án) tại `scratchpad/ref/backend/app/services/bridge_control.py`, `scratchpad/ref/backend/tests/test_bridge_control.py` và các endpoint liên quan. Hệ thống đã được nâng cấp thêm cơ chế chống SSRF bằng `ipaddress`, xử lý reentrant lock, quản lý vòng đời lifespan Starlette và giao diện theo dõi nhật ký stderr 20 dòng gần nhất.
+
+### Các thay đổi chi tiết
+
+| Tệp thay đổi | Loại thao tác | Mô tả chi tiết | Mục đích / Tác động |
+|---|---|---|---|
+| `backend/app/services/bridge_control.py` | Tạo mới | 1. Class `BridgeControl` quản lý tiến trình nền camera bridge qua `subprocess.Popen` (danh sách tham số CLI, không mở shell).<br>2. Xác thực an toàn `validate_camera_url`: chỉ chấp nhận scheme HTTP(S) tới IP LAN cục bộ hoặc loopback (ngăn chặn SSRF qua `ipaddress`), cấm thông tin đăng nhập nhúng trong URL.<br>3. Truyền `DEVICE_TOKEN` qua biến môi trường `env`, tuyệt đối không truyền qua `argv` để tránh rò rỉ trong bảng tiến trình hệ thống (`ps`).<br>4. Đảm bảo chỉ 1 tiến trình chạy tại một thời điểm, cơ chế dừng an toàn `terminate` và `kill` sau 3 giây.<br>5. Luồng daemon đọc bộ đệm `stderr` lưu giữ 20 dòng gần nhất để hiển thị lỗi cho người dùng. | Cung cấp dịch vụ quản lý vòng đời cầu nối camera an toàn, tin cậy và minh bạch. |
+| `backend/app/api/devices.py` | Chỉnh sửa | 1. Tích hợp `devices_lifespan`: tự động gọi `bridge.stop()` khi ứng dụng FastAPI dừng hoạt động.<br>2. Bổ sung các REST endpoint yêu cầu token quản trị (`verify_token`): `GET /api/bridge/status`, `POST /api/bridge/start` (`source: "webcam"|"esp32"`, `camera_url`), `POST /api/bridge/stop` (kèm các route alias `/api/camera-bridge/*`). | Cho phép bảng điều khiển tương tác điều khiển tiến trình camera. |
+| `backend/app/core/config.py` | Chỉnh sửa | Bổ sung các thuộc tính cấu hình mặc định: `default_camera_url`, `bridge_device_id`, `backend_port`. | Hỗ trợ fallback cấu hình cho camera bridge. |
+| `backend/.env.example` | Chỉnh sửa | Thêm các dòng cấu hình mẫu: `CAMERA_CAPTURE_URL`, `CAMERA_DEVICE_ID`, `BACKEND_PORT`. | Hướng dẫn cấu hình môi trường chuẩn. |
+| `backend/tests/test_bridge_control.py` | Tạo mới | Bộ 14 bài kiểm thử tự động toàn diện: kiểm tra chống SSRF (chặn 8.8.8.8, file://, domain ngoài), kiểm tra không cho phép 2 tiến trình song song, mock subprocess không mở shell, ẩn token khỏi argv, kiểm tra timeout 3s khi stop, kiểm tra quyền admin và kiểm tra dọn dẹp khi lifespan shutdown. | Đảm bảo 100% độ bao phủ kiểm thử cho tính năng mới. |
+| `frontend/src/App.tsx` | Chỉnh sửa | Tại tab `devices`: thêm bảng điều khiển Cầu nối Camera với 3 nút chức năng "Bật camera laptop", "Bật ESP32-CAM" (ô nhập URL camera cổng 80), "Tắt cầu nối", hiển thị trạng thái hoạt động, PID và khung nhật ký lỗi stderr (20 dòng gần nhất). | Cung cấp trải nghiệm điều khiển camera 1-click trực quan cho người dùng. |
+| `frontend/src/styles.css` | Chỉnh sửa | Bổ sung CSS cho grid trạng thái cầu nối, form điều khiển và hộp log stderr tối màu. | Đảm bảo tính thẩm mỹ, nhất quán giao diện Dark HUD. |
+| `README.md` | Chỉnh sửa | Cập nhật mục Bước 4 hướng dẫn bật/tắt camera trực tiếp từ Web UI bên cạnh các script terminal. | Hướng dẫn người dùng phương thức vận hành mới. |
+| `docs/thay_doi.md` | Chỉnh sửa | Ghi nhận chi tiết thay đổi và kết quả nghiệm thu Task T11. | Nhật ký phát triển hệ thống. |
+
+### Kết quả kiểm thử thực tế
+- Backend Tests: `PYTHONPATH=backend pytest backend/tests -q` $\rightarrow$ **96 passed, 3 warnings in 13.31s** (tăng thêm 14 test case mới, 100% test suite vượt qua).
+- Frontend Build: `npm run build` $\rightarrow$ **Thành công 100% (0 lỗi TypeScript)**.
+
 
 
 

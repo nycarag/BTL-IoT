@@ -133,17 +133,17 @@ IOT/
    * Tài khoản quản trị: **`admin`** / Mật khẩu: **`admin123456`**
    * Giao diện sẽ tự động mở tab **🖥️ Kiosk Điểm Danh**.
 
-4. **Bước 4: Kết nối luồng Camera (Mở terminal thứ hai)**
-   * **Nếu dùng Webcam máy tính để test nhanh**:
-     ```bash
-     ./start_webcam.sh
-     ```
-   * **Nếu dùng phần cứng ESP32-CAM qua Wi-Fi**:
-     - Kết nối máy tính vào Wi-Fi do ESP32 phát ra: `ESP32_DIEM_DANH` (mật khẩu: `12345678`).
-     - Chạy script kết nối:
+4. **Bước 4: Kết nối luồng Camera**
+   * **Bật/tắt camera trực tiếp từ Web UI (Khuyên dùng)**:
+     - Bạn không cần mở terminal thứ hai: vào tab **Thiết bị & vùng điểm danh** trên dashboard, nhấn nút **Bật camera laptop** hoặc **Bật ESP32-CAM** (kèm URL snapshot).
+     - Backend tự động quản lý tiến trình nền an toàn (chống SSRF, tự ngắt khi tắt server) và hiển thị trực tiếp PID cùng nhật ký lỗi gần nhất.
+   * **Hoặc chạy bằng terminal/kịch bản shell riêng**:
+     - *Dùng Webcam máy tính để test nhanh*:
        ```bash
-       ./start_esp32.sh
+       ./start_webcam.sh
        ```
+     - *Dùng phần cứng ESP32-CAM qua Wi-Fi*:
+       Kết nối máy tính vào Wi-Fi `ESP32_DIEM_DANH` (mật khẩu: `12345678`), rồi chạy `./start_esp32.sh`.
 
 ---
 
