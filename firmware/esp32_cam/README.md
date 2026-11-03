@@ -20,11 +20,11 @@ Nhằm tránh hiện tượng luồng video `/stream` chiếm giữ kết nối 
 
 ## Cấu Hình Camera & Bộ Đệm Khung Hình (Nguồn Chuẩn Espressif)
 
-* **Chế độ lấy khung hình (`grab_mode`):** `CAMERA_GRAB_LATEST` (nguồn: `esp_camera.h` - Espressif). Driver camera luôn ghi đè khung hình cũ và trả về khung hình mới nhất tại thời điểm gọi `esp_camera_fb_get()`, triệt tiêu hoàn toàn độ trễ tích lũy trong hàng đợi.
-* **Bộ đệm kép (`fb_count = 2`) & Vị trí PSRAM (`CAMERA_FB_IN_PSRAM`):** Khi board nhận PSRAM (`psramFound()`), kích hoạt double-buffering trong PSRAM ngoài giúp DMA camera truyền nhận song song với luồng mạng Wi-Fi, không giật hình.
+* **Chế độ lấy khung hình (`grab_mode`):** `CAMERA_GRAB_LATEST` (nguồn: `esp_camera.h` - Espressif). Driver camera luôn ghi đè khung hình cũ và trả về khung hình mới nhất tại thời điểm gọi `esp_camera_fb_get()`, không xếp hàng khung cũ.
+* **Bộ đệm kép (`fb_count = 2`) & Vị trí PSRAM (`CAMERA_FB_IN_PSRAM`):** Khi board nhận PSRAM (`psramFound()`), kích hoạt double-buffering trong PSRAM ngoài giúp DMA camera truyền nhận song song với luồng mạng Wi-Fi.
 * **Fallback an toàn khi thiếu PSRAM:** Tự động hạ độ phân giải xuống `FRAMESIZE_QVGA` (320×240), `config.fb_count = 1` và lưu trên DRAM nội bộ (`CAMERA_FB_IN_DRAM`) để tránh tràn bộ nhớ heap.
 * **Tần số xung nhịp (`xclk_freq_hz`):** Giữ nguyên `20000000` (20 MHz) theo chuẩn cảm biến OV2640 trên board AI Thinker để đảm bảo xung nhịp quét pixel ổn định, không sọc nhiễu.
-* **Chất lượng nén JPEG (`jpeg_quality`):** Giữ mức `12` (dải tối ưu 10–12 theo `CameraWebServer` của Espressif), cho kích thước frame ~8–15 KB, truyền tải mượt mà 25–30 FPS qua Wi-Fi mà không gây nghẽn buffer.
+* **Chất lượng nén JPEG (`jpeg_quality`):** Giữ mức `12` (dải tối ưu 10–12 theo `CameraWebServer` của Espressif).
 
 ## Quản Lý Nguồn Điện & Bảo Vệ Brownout
 

@@ -16,11 +16,11 @@ Nhằm tách biệt hoàn toàn luồng truyền video streaming liên tục kh�
 
 1. **Giảm độ trễ khung hình (`CAMERA_GRAB_LATEST`):**
    * Đặt `config.grab_mode = CAMERA_GRAB_LATEST` (nguồn: `esp_camera.h` - Espressif). Driver luôn ghi đè khung hình cũ trong hàng đợi và chỉ trả về khung hình mới nhất khi gọi `esp_camera_fb_get()`.
-2. **Tối ưu hóa bộ đệm khung hình (PSRAM / DRAM):**
+2. **Bộ đệm khung hình (PSRAM / DRAM):**
    * Khi board có PSRAM (`psramFound()`): kích hoạt `config.fb_count = 2` và `config.fb_location = CAMERA_FB_IN_PSRAM` ở độ phân giải `FRAMESIZE_CIF` (400×296).
    * Khi board không có PSRAM: tự động chuyển sang `config.fb_count = 1`, `config.fb_location = CAMERA_FB_IN_DRAM` và hạ độ phân giải về `FRAMESIZE_QVGA` (320×240) để đảm bảo không bị tràn DRAM nội bộ.
 3. **Loại bỏ độ trễ nhân tạo trong vòng lặp stream:**
-   * Đã gỡ bỏ hoàn toàn lệnh `delay(80)` trong hàm `streamHandler`. Driver camera và phần cứng DMA tự điều tiết nhịp đọc khung hình theo chu kỳ cảm biến OV2640, cho phép luồng stream đạt 25–30 FPS thực tế.
+   * Đã gỡ bỏ lệnh `delay(80)` trong hàm `streamHandler`. Driver camera và phần cứng DMA tự điều tiết nhịp đọc khung hình theo chu kỳ cảm biến OV2640.
    * Khi socket mạng đóng hoặc gửi chunk thất bại, hàm lập tức giải phóng bộ đệm `esp_camera_fb_return(frame)` và thoát `break` ngay, không rò rỉ bộ nhớ.
 4. **Bảo vệ sụt áp (Brownout):**
    * Mặc định **bật** Brownout Detector để bảo vệ chip và bộ nhớ flash.
