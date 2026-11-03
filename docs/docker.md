@@ -14,7 +14,7 @@ Docker build và container runtime **chưa được xác minh trong lần bàn g
 
 1. Kiểm tra Docker Desktop WSL integration hoặc Docker Engine và Compose v2.
 2. Chạy từ `BTL-new`.
-3. `.env` cần có `ADMIN_PASSWORD`, `DEVICE_TOKEN` không rỗng (đã tạo riêng trong triển khai này). Với bản sao mới, copy `.env.example` và tự tạo secret; không giữ giá trị mẫu.
+3. `.env` cần có `ADMIN_PASSWORD`, `DEVICE_TOKEN`, và `SECRET_KEY` (tối thiểu 32 ký tự ngẫu nhiên để ký bearer token bền vững, tránh mất phiên khi container restart). Với bản sao mới, copy `backend/.env.example` và tự tạo secret; không giữ giá trị mẫu. Các biến điều khiển AI hỗ trợ cấu hình qua môi trường: `FACE_DETECTOR` (mặc định `yunet`, tự động fallback sang `haar`), `LIVENESS_MODE` (mặc định `blink`, đặt `off` nếu demo không cần chớp mắt), `LIVENESS_CLOSED_RATIO` (`0.75`), `LIVENESS_WINDOW_S` (`5.0`), `LIVENESS_MAX_HZ` (`10.0`), `PAD_REAL_THRESHOLD` (`0.45`).
 4. File model `models/minifasnet-v2/MiniFASNetV2.onnx` và `data/class_roster.json` phải tồn tại; source bind dùng `create_host_path:false` để tránh tạo thư mục thay file.
 5. `INSTALL_RECOGNITION=true` biên dịch dlib, cần Internet/RAM/thời gian. `false` giảm build nhưng API đăng ký/nhận diện sẽ báo unavailable, chỉ dùng quản lý/thủ công.
 6. HTTP bind mặc định mọi interface để ESP32 truy cập. Dùng firewall chỉ cho mạng tin cậy. Có thể đặt `BACKEND_BIND=127.0.0.1`, `FRONTEND_BIND=127.0.0.1` nếu chỉ thao tác laptop.
@@ -86,7 +86,7 @@ docker compose logs -f       # xem log
 - **Trùng cổng:** đổi `BACKEND_PORT` / `FRONTEND_PORT` trong `.env`, cập nhật `SERVER_URL` firmware theo cổng backend mới.
 - **Thiếu model:** tải đúng release ONNX được ghi ở model-evaluation.md, không đổi tên `.pth` thành `.onnx`.
 - **dlib build lỗi/OOM:** xem log builder, tăng RAM Docker hoặc giảm `CMAKE_BUILD_PARALLEL_LEVEL` trong Dockerfile. Muốn thử dashboard trước có thể build `INSTALL_RECOGNITION=false`, nhưng phải build lại true để nhận diện.
-- **API 401:** dùng tài khoản `.env` gốc; token hết hạn thì đăng nhập lại. ESP32 phải dùng đúng DEVICE_TOKEN.
+- **API 401:** dùng tài khoản `.env` gốc; kiểm tra `SECRET_KEY` cố định trong `.env` để token không bị vô hiệu hóa khi container khởi động lại. ESP32 phải dùng đúng `DEVICE_TOKEN`.
 - **API 409 khi gửi ảnh:** heartbeat, gán thiết bị vào phiên đang mở. Phiên đã đóng không mở lại.
 - **PAD/recognition chưa ready:** không bật cờ bừa; xem hướng dẫn calibration và dependency.
 - **Camera mất mạng:** dashboard báo offline sau TTL, hệ thống không báo thành công giả. Sự kiện offline hiện suy ra từ heartbeat, không có background job tự lưu log chuyển offline.

@@ -18,7 +18,7 @@ bearer = HTTPBearer(auto_error=False)
 
 def _signature(payload: str) -> str:
     return hmac.new(
-        settings.admin_password.encode("utf-8"), payload.encode("ascii"), hashlib.sha256
+        settings.secret_key.encode("utf-8"), payload.encode("ascii"), hashlib.sha256
     ).hexdigest()
 
 
@@ -31,8 +31,8 @@ def issue_token(username: str) -> str:
 def verify_token(credentials: HTTPAuthorizationCredentials | None = Depends(bearer)) -> str:
     if not credentials or credentials.scheme.lower() != "bearer":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Bearer token required")
-    if not settings.admin_password:
-        raise HTTPException(status_code=503, detail="Administrator password is not configured")
+    if not settings.secret_key:
+        raise HTTPException(status_code=503, detail="Secret key is not configured")
     try:
         encoded, supplied_signature = credentials.credentials.split(".", 1)
         expected = _signature(encoded)

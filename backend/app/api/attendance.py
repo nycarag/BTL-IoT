@@ -14,15 +14,15 @@ from app.core.config import settings
 from app.core.security import verify_device_token, verify_token
 from app.database import get_db
 from app.models import Attendance, AttendanceSession, Device, LivenessEvent, Student
-from app.models.school import DeviceConfig, utcnow
+from app.models.school import DeviceConfig, FaceReference, utcnow
 from app.schemas import AttendanceResponse, LivenessEventResponse
 from app.schemas.api import ManualAttendance
 from app.services.antispoof import AntiSpoofAdapter
 from app.services.face_detector import FaceDetector
-from app.services.face_recognition import FaceRecognitionAdapter
+from app.services.face_recognition import FaceRecognitionAdapter, match
 from app.services.attendance_service import record_attendance
 from app.services.stability import gate
-from app.services.images import MAX_IMAGE_BYTES, validate_image
+from app.services.images import MAX_IMAGE_BYTES, decode_image, validate_image
 from app.services.websocket import manager
 from app.services.camera_preview import previews
 from app.services.audio_service import play_attendance_sound
@@ -46,6 +46,12 @@ def _pad():
 @lru_cache(maxsize=1)
 def _recognizer():
     return FaceRecognitionAdapter()
+
+
+@lru_cache(maxsize=1)
+def _liveness():
+    from app.services.liveness import tracker
+    return tracker
 
 
 def _attendance_response(item):
@@ -98,7 +104,9 @@ async def _process_frame(device_id, image, session_id, db):
     if now - last_frames.get(device_id, -100) < settings.frame_interval_seconds:
         raise HTTPException(429, "Frame rate exceeded", headers={"Retry-After": "1"})
     if len(last_frames) > 256:
-        last_frames.clear()
+        stale_keys = [k for k, t in last_frames.items() if now - t > 60]
+        for k in stale_keys:
+            last_frames.pop(k, None)
     last_frames[device_id] = now
     if image.content_type not in {"image/jpeg", "image/png"}:
         raise HTTPException(415, "Only JPEG and PNG accepted")
@@ -106,7 +114,7 @@ async def _process_frame(device_id, image, session_id, db):
     if len(body) > MAX_IMAGE_BYTES:
         raise HTTPException(413, "Image is too large")
     try:
-        validate_image(body)
+        frame = decode_image(body)
     except ValueError as exc:
         gate.reset((device_id, session_id))
         await event(db, session_id, device_id, "rejected", str(exc))
@@ -125,24 +133,48 @@ async def _process_frame(device_id, image, session_id, db):
     roi = (config.roi_left, config.roi_top, config.roi_right, config.roi_bottom)
     key = (device_id, session_id)
     try:
-        detection, reason = await run_in_threadpool(lambda: _detector().detect_largest(body, roi))
+        detection, reason = await run_in_threadpool(lambda: _detector().detect_largest(frame, roi))
         if detection is None or reason != "ok":
             gate.reset(key)
             await event(db, session_id, device_id, "rejected", f"detector: {reason}")
             return respond({"accepted": False, "reason": reason}, detection)
         if not gate.observe(key, detection.box):
             return respond({"accepted": False, "reason": "waiting for stable face"}, detection)
-        pad = await run_in_threadpool(lambda: _pad().evaluate(body, detection.box))
+        pad = await run_in_threadpool(lambda: _pad().evaluate(frame, detection.box))
         if not pad.is_real:
             await event(db, session_id, device_id, "rejected", f"pad: {pad.reason}; real_score={pad.score}")
             return respond({"accepted": False, "reason": pad.reason, "pad_score": pad.score}, detection)
-        recognition = await run_in_threadpool(lambda: _recognizer().recognize(body, detection.box, db, session.class_id))
+        if settings.liveness_mode == "blink":
+            trk = _liveness()
+            if not trk.is_available():
+                await event(db, session_id, device_id, "rejected", "liveness unavailable")
+                return respond({"accepted": False, "reason": "liveness unavailable"}, detection)
+            if not trk.has_recent_blink(
+                device_id,
+                within=settings.liveness_window_s,
+                near_center=detection.center,
+                frame_width=detection.frame_size[0],
+            ):
+                await event(db, session_id, device_id, "rejected", "liveness: blink required")
+                return respond({"accepted": False, "reason": "liveness: blink required"}, detection)
+        rec = _recognizer()
+        if not getattr(rec, "ready", False):
+            recognition = None
+        else:
+            probe = await run_in_threadpool(rec.encode, frame, detection.box)
+            rows = db.execute(
+                select(FaceReference, Student).join(Student, Student.id == FaceReference.student_id)
+                .where(Student.class_id == session.class_id)
+            ).all()
+            recognition = match(probe, rows)
         if recognition is None:
             await event(db, session_id, device_id, "rejected", "unknown, uncertain or unavailable identity")
             return respond({"accepted": False, "reason": "unknown, uncertain or unavailable identity"}, detection)
         student = db.scalar(select(Student).where(Student.student_code == recognition.student_code))
         row, created = record_attendance(db, session, student, device_id=device_id,
                                          verification=f"face+pad:{pad.score:.4f};distance:{recognition.distance:.4f}")
+        if settings.liveness_mode == "blink":
+            _liveness().consume_blink(device_id)
     except Exception:
         logger.exception("Attendance pipeline failed")
         db.rollback()

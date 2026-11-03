@@ -2,17 +2,39 @@
 
 from __future__ import annotations
 
+import logging
 import os
-from dataclasses import dataclass
+import secrets
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
 load_dotenv(ROOT_DIR / ".env")
 load_dotenv(ROOT_DIR / "backend" / ".env")
 DATA_DIR = Path(os.getenv("ATTENDANCE_DATA_DIR", ROOT_DIR / "data"))
 DEFAULT_PAD_MODEL = str(ROOT_DIR / "models" / "minifasnet-v2" / "MiniFASNetV2.onnx")
+DEFAULT_YUNET_MODEL = str(ROOT_DIR / "models" / "yunet" / "face_detection_yunet_2023mar.onnx")
+
+DEFAULT_CORS_ORIGIN_REGEX = (
+    r"^https?://(?:localhost|127\.0\.0\.1|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
+    r"172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|"
+    r"192\.168\.\d{1,3}\.\d{1,3})(?::\d+)?$"
+)
+
+
+def _resolve_secret_key() -> str:
+    key = os.getenv("SECRET_KEY", "").strip()
+    if not key:
+        key = secrets.token_hex(32)
+        logger.warning(
+            "SECRET_KEY is not set in environment; generated ephemeral key. "
+            "Tokens will be invalidated on server restart."
+        )
+    return key
 
 
 @dataclass(frozen=True)
@@ -22,6 +44,7 @@ class Settings:
     device_token: str = os.getenv("DEVICE_TOKEN", "esp32_device_secret_token_ptit")
     admin_username: str = os.getenv("ADMIN_USERNAME", "admin")
     admin_password: str = os.getenv("ADMIN_PASSWORD", "admin123456")
+    secret_key: str = field(default_factory=_resolve_secret_key)
     recognition_threshold: float = float(os.getenv("RECOGNITION_THRESHOLD", "0.52"))
     recognition_margin: float = float(os.getenv("RECOGNITION_MARGIN", "0.05"))
     min_face_area_ratio: float = float(os.getenv("MIN_FACE_AREA_RATIO", "0.03"))
@@ -32,17 +55,28 @@ class Settings:
     late_after_minutes: int = int(os.getenv("LATE_AFTER_MINUTES", "15"))
     frame_interval_seconds: float = float(os.getenv("FRAME_INTERVAL_SECONDS", "0.3"))
     preview_max_fps: int = max(1, min(60, int(os.getenv("PREVIEW_MAX_FPS", "30"))))
+    face_detector: str = os.getenv("FACE_DETECTOR", "yunet").lower().strip()
+    yunet_model_path: str = os.getenv("YUNET_MODEL_PATH", DEFAULT_YUNET_MODEL)
+    face_score_threshold: float = float(os.getenv("FACE_SCORE_THRESHOLD", "0.8"))
     pad_model_path: str = os.getenv("PAD_MODEL_PATH", DEFAULT_PAD_MODEL if os.path.exists(DEFAULT_PAD_MODEL) else "")
     pad_real_threshold: float = float(os.getenv("PAD_REAL_THRESHOLD", "0.45"))
     pad_crop_scale: float = float(os.getenv("PAD_CROP_SCALE", "2.7"))
+    liveness_mode: str = os.getenv("LIVENESS_MODE", "blink").lower().strip()
+    liveness_closed_ratio: float = float(os.getenv("LIVENESS_CLOSED_RATIO", "0.75"))
+    liveness_window_s: float = float(os.getenv("LIVENESS_WINDOW_S", "5.0"))
+    liveness_max_hz: float = float(os.getenv("LIVENESS_MAX_HZ", "10.0"))
     recognition_calibrated: bool = os.getenv("RECOGNITION_CALIBRATED", "true").lower() == "true"
     pad_calibrated: bool = os.getenv("PAD_CALIBRATED", "true").lower() == "true"
+    default_camera_url: str = os.getenv("CAMERA_CAPTURE_URL", "http://192.168.4.1/capture")
+    bridge_device_id: str = os.getenv("CAMERA_DEVICE_ID", "esp32-cam-01")
+    backend_port: int = int(os.getenv("BACKEND_PORT", "8000"))
     cors_origins: tuple[str, ...] = tuple(
         origin.strip() for origin in os.getenv(
             "CORS_ORIGINS",
             "http://localhost:8000,http://127.0.0.1:8000,http://localhost:8080,http://127.0.0.1:8080,http://localhost:5173,http://127.0.0.1:5173",
         ).split(",") if origin.strip()
     )
+    cors_origin_regex: str = os.getenv("CORS_ORIGIN_REGEX", DEFAULT_CORS_ORIGIN_REGEX).strip()
 
 
 settings = Settings()

@@ -2,12 +2,12 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from camera_bridge import CameraBridge
+from camera_bridge import CameraBridge, infer_stream_url
 
 
 class BridgeTests(unittest.TestCase):
     def bridge(self):
-        return CameraBridge("http://192.168.4.1:81/capture", "http://localhost:8000", "cam", "test-token")
+        return CameraBridge("http://192.168.4.1/capture", "http://localhost:8000", "cam", "test-token")
 
     def test_idle_probes_camera_before_heartbeat(self):
         bridge = self.bridge()
@@ -44,7 +44,23 @@ class BridgeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             CameraBridge("file:///etc/passwd", "http://localhost:8000", "cam", "token")
         with self.assertRaises(ValueError):
-            CameraBridge("http://192.168.4.1:81/capture", "http://localhost:8000", "cam", "")
+            CameraBridge("http://192.168.4.1/capture", "http://localhost:8000", "cam", "")
+
+    def test_infer_stream_url(self):
+        self.assertEqual(
+            infer_stream_url("http://192.168.4.1/capture"),
+            "http://192.168.4.1:81/stream",
+        )
+        self.assertEqual(
+            infer_stream_url("http://10.0.0.5:8080/capture"),
+            "http://10.0.0.5:81/stream",
+        )
+        self.assertEqual(
+            infer_stream_url("https://esp32.local/capture"),
+            "https://esp32.local:81/stream",
+        )
+        with self.assertRaises(ValueError):
+            infer_stream_url("http:///capture")
 
     def test_config_is_refreshed_without_restarting_bridge(self):
         bridge = self.bridge()

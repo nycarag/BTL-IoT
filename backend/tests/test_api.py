@@ -1,9 +1,12 @@
 """Isolated API tests. AI acceptance is mocked; this is not PAD validation."""
+import json
 import os
 import tempfile
 import unittest
 from datetime import timedelta
 from unittest.mock import patch
+
+import numpy as np
 
 os.environ["ADMIN_PASSWORD"] = "test-password-only"
 os.environ["DEVICE_TOKEN"] = "test-device-only"
@@ -44,7 +47,7 @@ class ApiTests(unittest.TestCase):
         self.client.post("/api/devices/heartbeat", json={"name": "Camera"}, headers=self.device)
         self.client.put("/api/devices/cam/config", headers=self.auth, json={"session_id": self.session_id})
         with self.factory() as db:
-            db.add(FaceReference(student_id=self.student_id, embedding="[]", enrolled_by="test"))
+            db.add(FaceReference(student_id=self.student_id, embedding=json.dumps([0.0] * 128), enrolled_by="test"))
             db.commit()
         gate.tracks.clear()
 
@@ -103,10 +106,16 @@ class ApiTests(unittest.TestCase):
 
     def test_pipeline_stability_pad_identity_and_duplicate(self):
         detection = FaceDetection((40, 40, 80, 80), (80, 80), 6400, (160, 160), True, 1)
-        with patch("app.api.attendance._detector") as detector, patch("app.api.attendance._pad") as pad, patch("app.api.attendance._recognizer") as recognizer:
+        with patch("app.api.attendance._detector") as detector, \
+             patch("app.api.attendance._pad") as pad, \
+             patch("app.api.attendance._recognizer") as recognizer, \
+             patch("app.api.attendance._liveness") as liveness:
             detector.return_value.detect_largest.return_value = (detection, "ok")
             pad.return_value.evaluate.return_value = PadResult(True, "passed", .99)
-            recognizer.return_value.recognize.return_value = RecognitionResult("SV1", .1)
+            recognizer.return_value.ready = True
+            recognizer.return_value.encode.return_value = np.zeros(128, dtype=np.float64)
+            liveness.return_value.is_available.return_value = True
+            liveness.return_value.has_recent_blink.return_value = True
             self.assertFalse(self.frame().json()["accepted"])
             self.assertFalse(self.frame().json()["accepted"])
             self.assertTrue(self.frame().json()["created"])
@@ -144,6 +153,34 @@ class ApiTests(unittest.TestCase):
             with self.client.websocket_connect(f"/ws/sessions/{self.session_id}") as ws:
                 ws.send_json({"token": "invalid"})
                 ws.receive_json()
+
+    def test_cors_origin_filtering(self):
+        # Disallowed origin: http://evil.com must NOT receive Access-Control-Allow-Origin
+        res_evil = self.client.get("/health", headers={"Origin": "http://evil.com"})
+        self.assertNotIn("access-control-allow-origin", res_evil.headers)
+
+        # Allowed origin via private LAN regex: http://192.168.4.2:5173 receives header
+        res_lan = self.client.get("/health", headers={"Origin": "http://192.168.4.2:5173"})
+        self.assertEqual(res_lan.headers.get("access-control-allow-origin"), "http://192.168.4.2:5173")
+
+        # Allowed origin via localhost: http://localhost:8000 receives header
+        res_local = self.client.get("/health", headers={"Origin": "http://localhost:8000"})
+        self.assertEqual(res_local.headers.get("access-control-allow-origin"), "http://localhost:8000")
+
+    def test_token_with_different_key_rejected(self):
+        import base64
+        import hashlib
+        import hmac
+        import time
+
+        payload = f"admin:{int(time.time()) + 3600}"
+        encoded = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
+        wrong_sig = hmac.new(b"completely-wrong-secret-key", encoded.encode("ascii"), hashlib.sha256).hexdigest()
+        bad_token = f"{encoded}.{wrong_sig}"
+
+        res = self.client.get("/api/students", headers={"Authorization": f"Bearer {bad_token}"})
+        self.assertEqual(res.status_code, 401)
+        self.assertIn("Invalid or expired token", res.json().get("detail", ""))
 
 
 if __name__ == "__main__":

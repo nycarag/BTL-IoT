@@ -1,15 +1,17 @@
 import { useEffect, useState, useRef } from "react";
+import {
+  useCameraStream,
+  computeContainOverlay,
+  computeRoiOverlay,
+  Preview,
+} from "./useCameraStream";
+import { getReasonInstruction } from "./CameraPanel";
 
 type Device = { id: string; name: string; status: string };
 type Student = { id: number; student_code: string; name: string; class_id: number | null; date_of_birth: string | null; enrolled: boolean };
 type Classroom = { id: number; code: string; name: string };
 type Attendance = { id: number; session_id?: number; student_id: number; student_code: string; student_name: string; checked_at: string; status: string; verification: string };
 type Session = { id: number; class_id: number; title: string; status: string };
-type Preview = {
-  available: boolean; received_at?: string; session_id?: number | null;
-  config: { session_id: number | null; active: boolean; roi_left: number; roi_top: number; roi_right: number; roi_bottom: number };
-  result?: { accepted?: boolean; created?: boolean; reason?: string; state?: string; student_code?: string; pad_score?: number; box?: number[]; frame_size?: number[] };
-};
 
 type Props = {
   api: (path: string, init?: RequestInit) => Promise<Response>;
@@ -26,21 +28,25 @@ type Props = {
 
 export default function KioskView({ api, devices, selectedSession, onSelectSession, token, apiUrl, students, classes, rows, sessions }: Props) {
   const [camera, setCamera] = useState("");
-  const [preview, setPreview] = useState<Preview | null>(null);
-  const [hasSource, setHasSource] = useState(false);
-  const [error, setError] = useState("");
   const [lastCheckin, setLastCheckin] = useState<{ student: Student; time: string; score?: number; created?: boolean } | null>(null);
   const [activeAlert, setActiveAlert] = useState<{ name: string; student_code: string; isNew: boolean; time: string } | null>(null);
   const alertTimerRef = useRef<number | null>(null);
   const effectiveCamera = devices.some(d => d.id === camera) ? camera : devices[0]?.id ?? "";
   const lastAcceptedRef = useRef<string>("");
-  const imgRef = useRef<HTMLImageElement>(null);
 
   const studentsRef = useRef(students);
   studentsRef.current = students;
   const apiRef = useRef(api);
   apiRef.current = api;
   const audioCtxRef = useRef<AudioContext | null>(null);
+
+  // Hook camera stream duy nhất quản lý WebSocket, canvas rendering và FPS
+  const { canvasRef, meta, fps, connected: hasSource, canvasSize } =
+    useCameraStream(effectiveCamera, token, apiUrl, false);
+
+  const preview: Preview | null = meta;
+  const roi = preview?.config;
+  const result = preview?.result;
 
   // Khởi tạo và mở khóa AudioContext khi người dùng tương tác với trang
   const getAudioContext = () => {
@@ -104,134 +110,52 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
     }
   };
 
+  // Kích hoạt phản hồi khi nhận diện thành công qua meta đẩy từ WebSocket
   useEffect(() => {
-    if (!effectiveCamera) return;
-    let stopped = false; let timer: number; let reconnect: number; let objectUrl = "";
-    let socket: WebSocket; let lastImage = Date.now();
-    const controller = new AbortController();
-    const release = () => {
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-      objectUrl = "";
-      if (imgRef.current) imgRef.current.src = "";
-    };
+    const res = preview?.result;
+    if (res?.accepted && res.student_code) {
+      const stu = studentsRef.current.find(s => s.student_code === res.student_code);
+      const studentName = stu?.name || (res as { student_name?: string }).student_name || res.student_code;
+      const isCreated = res.created !== false;
 
-    const connect = () => {
-      const url = new URL(`/ws/devices/${encodeURIComponent(effectiveCamera)}/camera`, apiUrl || window.location.origin);
-      url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-      socket = new WebSocket(url); socket.binaryType = "blob";
-      socket.onopen = () => socket.send(JSON.stringify({ token }));
-      socket.onmessage = async event => {
-        if (typeof event.data === "string") {
-          return;
+      if (res.student_code !== lastAcceptedRef.current) {
+        lastAcceptedRef.current = res.student_code;
+        const checkinTime = new Date().toLocaleTimeString("vi-VN");
+        const fullStudent: Student = stu || {
+          id: 0, student_code: res.student_code, name: studentName, class_id: null, date_of_birth: null, enrolled: true
+        };
+        setLastCheckin({
+          student: fullStudent,
+          time: checkinTime,
+          score: res.pad_score,
+          created: isCreated
+        });
+
+        if (isCreated) {
+          playChime();
         }
-        const currentSocket = socket;
-        const nextUrl = URL.createObjectURL(event.data);
-        const image = new Image(); image.src = nextUrl;
-        try {
-          await image.decode();
-          if (stopped || currentSocket !== socket) {
-            URL.revokeObjectURL(nextUrl);
-            return;
-          }
-          const oldUrl = objectUrl;
-          objectUrl = nextUrl;
-          if (imgRef.current) {
-            imgRef.current.src = nextUrl;
-          }
-          setHasSource(true);
-          setError("");
-          lastImage = Date.now();
-          if (oldUrl) URL.revokeObjectURL(oldUrl);
-          if (!stopped && currentSocket.readyState === WebSocket.OPEN) {
-            currentSocket.send("next");
-          }
-        } catch {
-          URL.revokeObjectURL(nextUrl);
-          if (!stopped && currentSocket.readyState === WebSocket.OPEN) {
-            currentSocket.send("next");
-          }
-        }
-      };
-      socket.onclose = event => {
-        if (stopped) return;
-        setError(event.code === 4401 ? "Phiên xem camera hết hạn — đăng nhập lại" : "Đang kết nối lại luồng camera…");
-        if (event.code !== 4401) reconnect = window.setTimeout(connect, 1000);
-      };
-      socket.onerror = () => socket.close();
-    };
 
-    const update = async () => {
-      try {
-        const path = `/devices/${encodeURIComponent(effectiveCamera)}/preview`;
-        const metadata: Preview = await (await apiRef.current(path, { signal: controller.signal, cache: "no-store" })).json();
-        if (!stopped) {
-          setPreview(metadata);
-          // Chỉ xóa source khi camera mất tín hiệu hoàn toàn quá 15 giây
-          if (Date.now() - lastImage > 15000 && !metadata.available) {
-            release();
-            setHasSource(false);
-          }
+        if (alertTimerRef.current) clearTimeout(alertTimerRef.current);
+        setActiveAlert({
+          name: studentName,
+          student_code: res.student_code,
+          isNew: isCreated,
+          time: checkinTime
+        });
 
-          // Kích hoạt phản hồi khi nhận diện thành công
-          const res = metadata?.result;
-          if (res?.accepted && res.student_code) {
-            const stu = studentsRef.current.find(s => s.student_code === res.student_code);
-            const studentName = stu?.name || (res as { student_name?: string }).student_name || res.student_code;
-            const isCreated = res.created !== false;
+        alertTimerRef.current = window.setTimeout(() => {
+          setActiveAlert(null);
+          lastAcceptedRef.current = "";
+        }, 4000);
+      }
+    }
+  }, [preview?.result]);
 
-            if (res.student_code !== lastAcceptedRef.current) {
-              lastAcceptedRef.current = res.student_code;
-              const checkinTime = new Date().toLocaleTimeString("vi-VN");
-              const fullStudent: Student = stu || {
-                id: 0, student_code: res.student_code, name: studentName, class_id: null, date_of_birth: null, enrolled: true
-              };
-              setLastCheckin({
-                student: fullStudent,
-                time: checkinTime,
-                score: res.pad_score,
-                created: isCreated
-              });
-
-              if (isCreated) {
-                playChime();
-              }
-
-              if (alertTimerRef.current) clearTimeout(alertTimerRef.current);
-              setActiveAlert({
-                name: studentName,
-                student_code: res.student_code,
-                isNew: isCreated,
-                time: checkinTime
-              });
-
-              alertTimerRef.current = window.setTimeout(() => {
-                setActiveAlert(null);
-                lastAcceptedRef.current = "";
-              }, 4000);
-            }
-          }
-        }
-      } catch (e) {
-        if (!stopped) {
-          setError(e instanceof Error ? e.message : "Mất kết nối ảnh camera");
-        }
-      } finally { if (!stopped) timer = window.setTimeout(update, 600); }
-    };
-
-    connect(); void update();
+  useEffect(() => {
     return () => {
-      stopped = true;
-      controller.abort();
-      clearTimeout(timer);
-      clearTimeout(reconnect);
       if (alertTimerRef.current) clearTimeout(alertTimerRef.current);
-      socket?.close();
-      release();
     };
-  }, [effectiveCamera, token, apiUrl]);
-
-  const roi = preview?.config;
-  const result = preview?.result;
+  }, []);
 
   // Lọc chính xác các lượt điểm danh thuộc phiên hiện tại
   const sessionRows = currentSessionId
@@ -255,6 +179,51 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
   const effectiveDevice = devices.find(d => d.id === effectiveCamera);
   const deviceDisplayName = effectiveDevice ? effectiveDevice.name : effectiveCamera || "CAMERA";
   const studentClassName = classes?.find(c => c.id === (lastCheckin?.student.class_id ?? currentSession?.class_id))?.code || "D23CTAT01-B";
+
+  // Tính toán khung mặt và ROI theo tỷ lệ contain không lệch khi resize
+  const frameSize = result?.frame_size;
+  const boxOverlay = computeContainOverlay(result?.box, frameSize, canvasSize.width, canvasSize.height);
+  const roiOverlay = computeRoiOverlay(roi, frameSize, canvasSize.width, canvasSize.height);
+
+  // Xác định trạng thái kết quả điểm danh & liveness
+  const isBlinkRequired = Boolean(hasSource && result?.reason === "liveness: blink required");
+  const isSuccess = Boolean(hasSource && preview?.config.active && preview.session_id === preview.config.session_id && result?.accepted === true);
+  const isWaitingOrAuthenticating = Boolean(
+    hasSource && !isSuccess && (
+      isBlinkRequired ||
+      result?.reason === "waiting for stable face" ||
+      result?.state === "processing"
+    )
+  );
+  const isRejected = Boolean(
+    hasSource && !isSuccess && !isWaitingOrAuthenticating && (
+      result?.accepted === false ||
+      (Boolean(result?.reason) && result?.reason !== "ok" && result?.state !== "preview")
+    )
+  );
+
+  // 4 trạng thái màu khung mặt theo yêu cầu T09:
+  // - xam (dang tim / preview)
+  // - vang (dang xac thuc / cho chop mat / processing)
+  // - xanh (thanh cong / accepted)
+  // - do (bi tu choi PAD / khong nhan ra / loi)
+  const faceStatus = isSuccess
+    ? "green"
+    : isWaitingOrAuthenticating
+    ? "yellow"
+    : isRejected
+    ? "red"
+    : "gray";
+
+  const faceTagText = isSuccess
+    ? (result?.student_code || "HỢP LỆ")
+    : isBlinkRequired
+    ? "CHỚP MẮT"
+    : isWaitingOrAuthenticating
+    ? "ĐANG XÁC THỰC"
+    : isRejected
+    ? (result?.reason?.includes("spoof") ? "TỪ CHỐI (PAD)" : result?.reason?.includes("unknown") ? "CHƯA NHẬN DIỆN" : "CẦN ĐIỀU CHỈNH")
+    : "ĐANG TÌM";
 
   return (
     <div className="kiosk-container">
@@ -324,17 +293,9 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
 
           <div className="kiosk-viewport">
             <div className="kiosk-image-wrapper" style={{ display: hasSource ? "block" : "none" }}>
-              <img ref={imgRef} alt="Stream Kiosk" />
-              {roi && (
-                <div
-                  className="kiosk-roi-box"
-                  style={{
-                    left: `${roi.roi_left * 100}%`,
-                    top: `${roi.roi_top * 100}%`,
-                    width: `${(roi.roi_right - roi.roi_left) * 100}%`,
-                    height: `${(roi.roi_bottom - roi.roi_top) * 100}%`
-                  }}
-                >
+              <canvas ref={canvasRef} style={{ width: "100%", height: "auto", display: "block" }} />
+              {roiOverlay && (
+                <div className="kiosk-roi-box" style={roiOverlay}>
                   <div className="roi-corner top-left"></div>
                   <div className="roi-corner top-right"></div>
                   <div className="roi-corner bottom-left"></div>
@@ -344,17 +305,25 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
                 </div>
               )}
               {/* Khung chữ nhật bám theo khuôn mặt nhận diện (Face Bounding Box) */}
-              {result?.box && result?.frame_size && (
+              {boxOverlay && (
                 <div
-                  className={`kiosk-face-box ${result.accepted ? "verified" : result.reason?.includes("spoof") ? "spoof" : "scanning"}`}
-                  style={{
-                    left: `${(result.box[0] / result.frame_size[0]) * 100}%`,
-                    top: `${(result.box[1] / result.frame_size[1]) * 100}%`,
-                    width: `${(result.box[2] / result.frame_size[0]) * 100}%`,
-                    height: `${(result.box[3] / result.frame_size[1]) * 100}%`,
-                  }}
+                  className={`kiosk-face-box status-${faceStatus}`}
+                  style={boxOverlay}
                 >
-                  <span className="face-tag">{result.student_code || (result.accepted ? "HỢP LỆ" : "ĐANG QUÉT")}</span>
+                  <span className="face-tag">{faceTagText}</span>
+                </div>
+              )}
+              {hasSource && <span className="camera-fps-badge">{fps} FPS</span>}
+              {/* Chỉ dẫn chớp mắt nổi bật khi reason là liveness blink */}
+              {isBlinkRequired && (
+                <div className="kiosk-blink-alert" role="alert" aria-live="assertive">
+                  <div className="blink-alert-inner">
+                    <span className="blink-eye-icon" aria-hidden="true">👁</span>
+                    <div className="blink-alert-text">
+                      <strong className="blink-alert-title">HÃY CHỚP MẮT MỘT LẦN</strong>
+                      <span className="blink-alert-sub">Chớp mắt tự nhiên để xác nhận người thật</span>
+                    </div>
+                  </div>
                 </div>
               )}
               {/* Overlay thông báo điểm danh */}
@@ -379,20 +348,16 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
             )}
           </div>
 
-          <div className="kiosk-instruction-bar">
-            <span className="kiosk-instruction-icon">ℹ</span>
-            <span>
+          <div className={`kiosk-instruction-bar${isBlinkRequired ? " blink-mode" : isRejected ? " error-mode" : ""}`}>
+            <span className="kiosk-instruction-icon" aria-hidden="true">
+              {isBlinkRequired ? "👁" : activeAlert ? "✓" : isRejected ? "!" : "ℹ"}
+            </span>
+            <span className="kiosk-instruction-text">
               {activeAlert
                 ? (activeAlert.isNew
                     ? `Điểm danh thành công: Sinh viên ${activeAlert.name} (${activeAlert.student_code}).`
                     : `Sinh viên ${activeAlert.name} (${activeAlert.student_code}) đã có mặt trong buổi học.`)
-                : result?.reason && result.reason !== "ok"
-                  ? (result.reason.includes("spoof")
-                      ? "Cảnh báo: Không thể xác thực khuôn mặt trực tiếp."
-                      : result.reason.includes("no face") || result.reason.includes("waiting")
-                        ? "Vui lòng nhìn thẳng vào camera trong khung nhận diện."
-                        : `Trạng thái: ${result.reason}`)
-                  : "Vui lòng nhìn thẳng vào camera để điểm danh."}
+                : getReasonInstruction(result?.reason)}
             </span>
           </div>
         </div>

@@ -43,6 +43,35 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.client.delete(f"/api/students/{self.student_id}/face", headers=self.auth).status_code, 204)
         self.assertFalse(self.client.get("/api/students", headers=self.auth).json()[0]["enrolled"])
 
+    def test_enrollment_multiple_images_stores_list_of_lists(self):
+        import json
+        from app.models.school import FaceReference
+        _, img1 = cv2.imencode(".jpg", np.zeros((160, 160, 3), dtype=np.uint8))
+        _, img2 = cv2.imencode(".jpg", np.ones((160, 160, 3), dtype=np.uint8))
+        with patch("app.api.students.FaceRecognitionAdapter") as recognizer:
+            recognizer.return_value.encode.side_effect = [
+                np.zeros(128, dtype=np.float64),
+                np.ones(128, dtype=np.float64),
+            ]
+            response = self.client.post(
+                f"/api/students/{self.student_id}/face",
+                headers=self.auth,
+                data={"consent": "true"},
+                files=[
+                    ("image", ("face1.jpg", img1.tobytes(), "image/jpeg")),
+                    ("image", ("face2.jpg", img2.tobytes(), "image/jpeg")),
+                ],
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["samples"], 2)
+        with self.factory() as db:
+            ref = db.get(FaceReference, self.student_id)
+            stored = json.loads(ref.embedding)
+            self.assertIsInstance(stored, list)
+            self.assertEqual(len(stored), 2)
+            self.assertEqual(len(stored[0]), 128)
+            self.assertEqual(len(stored[1]), 128)
+
     def test_late_arrival(self):
         with self.factory() as db:
             db.get(AttendanceSession, self.session_id).starts_at = utcnow() - timedelta(hours=1)
@@ -95,12 +124,13 @@ class EvaluationTests(unittest.TestCase):
         adapter.session = Mock()
         adapter.input_name, adapter.output_name, adapter.reason = "input", "output", "test"
         adapter.session.run.return_value = [np.array([[0., 10., 0.]])]
+        dummy_frame = np.zeros((80, 80, 3), dtype=np.uint8)
         with patch("app.services.antispoof.settings") as settings, patch("app.services.antispoof.prepare_face"):
             settings.pad_calibrated = True
             settings.pad_real_threshold = .9
-            self.assertTrue(adapter.evaluate(b"x", (1, 1, 10, 10)).is_real)
+            self.assertTrue(adapter.evaluate(dummy_frame, (1, 1, 10, 10)).is_real)
             settings.pad_calibrated = False
-            self.assertFalse(adapter.evaluate(b"x", (1, 1, 10, 10)).is_real)
+            self.assertFalse(adapter.evaluate(dummy_frame, (1, 1, 10, 10)).is_real)
             settings.pad_calibrated = True
             adapter.session.run.return_value = [np.array([[10., 0., 0.]])]
-            self.assertFalse(adapter.evaluate(b"x", (1, 1, 10, 10)).is_real)
+            self.assertFalse(adapter.evaluate(dummy_frame, (1, 1, 10, 10)).is_real)

@@ -55,6 +55,8 @@ class CameraSocketTests(unittest.TestCase):
         token = self.auth["Authorization"].split(" ", 1)[1]
         with self.client.websocket_connect("/ws/devices/cam/camera") as socket:
             socket.send_json({"token": token})
+            initial_meta = socket.receive_json()
+            self.assertEqual(initial_meta.get("type"), "meta")
             self.assertEqual(socket.receive_bytes(), b"first")
             previews.put("cam", b"discard-me")
             previews.put("cam", b"latest")

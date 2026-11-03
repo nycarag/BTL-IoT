@@ -20,7 +20,7 @@ Cách này tránh khác biệt routing Docker/WSL tới mạng SoftAP và **khô
 
 1. Khi còn Internet, tự build/chạy backend + frontend theo README. Docker image/model phải có sẵn trước khi chuyển sang Wi-Fi ESP32 không có Internet.
 2. Cấp nguồn ESP32, laptop kết nối `ESP32_DIEM_DANH` (password theo firmware bạn nạp). Windows báo “No Internet” là bình thường; giữ kết nối.
-3. Kiểm tra snapshot trong trình duyệt: <http://192.168.4.1:81/capture>. Phải thấy một ảnh. Đóng mọi tab `/stream` và tắt app BTL-IoT cũ đang đọc stream: server firmware cũ có thể bị stream liên tục chiếm nên `/capture` timeout.
+3. Kiểm tra snapshot trong trình duyệt: <http://192.168.4.1/capture>. Phải thấy một ảnh. Đóng mọi tab `/stream` và tắt app BTL-IoT cũ đang đọc stream nếu có: firmware đã phục vụ `/capture` trên cổng 80 độc lập với luồng stream cổng 81.
 4. Mở PowerShell tại dự án và kiểm tra:
 
 ```powershell
@@ -43,10 +43,10 @@ Nhấn Ctrl+C để dừng cầu nối. Dừng không tạo attendance offline. 
 
 ## Biến cấu hình `.env` gốc
 
-Mặc định tương thích firmware cũ, không bắt buộc thêm nếu dùng địa chỉ mặc định:
+Cấu hình mẫu tương thích firmware ESP32-CAM chuẩn hóa (Port 80 cho capture/status, Port 81 cho stream MJPEG):
 
 ```dotenv
-CAMERA_CAPTURE_URL=http://192.168.4.1:81/capture
+CAMERA_CAPTURE_URL=http://192.168.4.1/capture
 CAMERA_TRANSPORT=mjpeg
 CAMERA_STREAM_URL=http://192.168.4.1:81/stream
 CAMERA_PREVIEW_FPS=15
@@ -57,6 +57,12 @@ CAMERA_TIMEOUT_SECONDS=5
 # Cầu nối host, nếu backend port khác 8000:
 BRIDGE_BACKEND_URL=http://127.0.0.1:8000
 ```
+
+> [!TIP]
+> **Về việc tách Port HTTP server:**
+> * Cả hai firmware trong `firmware/` đều khởi chạy 2 HTTP daemon riêng biệt: **Port 80** phục vụ snapshot `/capture` và trạng thái `/status`; **Port 81** chuyên phục vụ luồng video `/stream`.
+> * Chế độ mặc định `CAMERA_TRANSPORT=mjpeg` của cầu nối đọc trực tiếp từ `CAMERA_STREAM_URL=http://192.168.4.1:81/stream` (port 81).
+> * Nếu chuyển sang chế độ snapshot capture (`CAMERA_TRANSPORT=capture`), đặt `CAMERA_CAPTURE_URL=http://192.168.4.1/capture` (cổng 80) để không làm nghẽn luồng stream.
 
 Token dùng `DEVICE_TOKEN` hiện có, không cần ADMIN_PASSWORD. Không gửi token/mật khẩu lên chat. Sau khi sửa `.env`, restart cầu nối. Nếu có sẵn env shell cùng tên, nó ưu tiên hơn file.
 
@@ -81,8 +87,8 @@ Nếu host mở snapshot được nhưng container không đọc được vì Do
 
 ## Chẩn đoán
 
-- Không vào được `192.168.4.1:81/capture`: kiểm tra đang kết nối đúng Wi-Fi, board có nguồn ổn định, firmware có `/capture`, tắt VPN/proxy cho mạng camera nếu cần. Cầu nối bỏ qua HTTP proxy hệ thống cho traffic cục bộ.
-- Capture timeout khi `/stream` mở: đóng stream; firmware cũ dùng chung HTTP server. Sketch SoftAP mới trong BTL-new tách stream sang port 82.
+- Không vào được `192.168.4.1/capture`: kiểm tra đang kết nối đúng Wi-Fi, board có nguồn ổn định, firmware có `/capture` (cổng 80), tắt VPN/proxy cho mạng camera nếu cần. Cầu nối bỏ qua HTTP proxy hệ thống cho traffic cục bộ.
+- Capture timeout khi `/stream` mở: firmware mới đã tách riêng 2 server (port 80 cho capture/status, port 81 cho stream MJPEG) theo chuẩn CameraWebServer của Espressif, triệt tiêu hiện tượng tranh chấp kết nối.
 - `HTTP 401`: DEVICE_TOKEN cầu nối và backend không trùng. Docker đọc `.env` gốc, không đọc `backend/.env`.
 - `HTTP 409`: assignment/phiên vừa thay đổi hoặc phiên đóng; cầu nối reload config và không mặc định thành công.
 - `HTTP 429`: có nguồn frame thứ hai hoặc chu kỳ quá nhanh; dừng nguồn thừa/điều chỉnh interval.
@@ -109,7 +115,7 @@ Backend không ghi SQLite mỗi frame preview, kiểm tra ảnh trong threadpool
 
 `CAMERA_PREVIEW_FPS=15` là mục tiêu, **chưa phải FPS đo thực tế**. Có thể thử 20 nếu Wi-Fi/CPU ổn và PREVIEW_MAX_FPS >= CAMERA_PREVIEW_FPS; nếu mạng không ổn, giảm 10–12. Không tăng FPS AI theo FPS video: giữ sampling .8s hoặc đo lại latency/stability. Không khắc phục được lỗi `No route to host` bằng cách tăng FPS.
 
-Firmware BTL-IoT cũ dùng stream port **81**. Sketch SoftAP mới của BTL-new dùng port **82**: đặt CAMERA_STREAM_URL tương ứng. Firmware chỉ chụp/nén JPEG/phát Wi-Fi; toàn bộ FE/BE/PAD/recognition chạy trên máy tính. Không cần nạp lại board hiện tại để dùng tối ưu bridge này.
+Cả firmware BTL-IoT và sketch SoftAP mới đều đã được chuẩn hóa theo kiến trúc CameraWebServer của Espressif: cổng **80** phục vụ `/capture` và `/status`, cổng **81** phục vụ luồng video `/stream`. Biến `CAMERA_STREAM_URL` mặc định được suy diễn tự động sang cổng 81 (`http://192.168.4.1:81/stream`), không còn sử dụng cổng 82. Firmware chỉ chụp/nén JPEG/phát Wi-Fi; toàn bộ FE/BE/PAD/recognition chạy trên máy tính. Không cần nạp lại board hiện tại nếu firmware của bạn đã đáp ứng các cổng này.
 
 Nếu firmware không có stream, đặt CAMERA_TRANSPORT=snapshot để fallback; preview/AI vẫn tách nhưng tốc độ bị giới hạn bởi HTTP capture. Không tự fallback song song khi stream lỗi, tránh khóa server ESP32 cũ.
 

@@ -1,5 +1,4 @@
 import json
-import numpy as np
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import select
@@ -12,7 +11,7 @@ from app.models import Attendance, ClassRoom, Student
 from app.models.school import FaceReference, utcnow
 from app.schemas import StudentCreate, StudentResponse
 from app.services.face_recognition import FaceRecognitionAdapter
-from app.services.images import validate_image
+from app.services.images import decode_image
 from starlette.concurrency import run_in_threadpool
 
 router = APIRouter()
@@ -122,8 +121,8 @@ async def enroll_face(
         if len(body) > 5 * 1024 * 1024:
             raise HTTPException(413, f"Ảnh {f.filename or ''} vượt quá dung lượng 5 MiB")
         try:
-            validate_image(body)
-            vec = await run_in_threadpool(recognizer.encode, body)
+            frame = decode_image(body)
+            vec = await run_in_threadpool(recognizer.encode, frame)
             enc_list.append(vec)
         except ValueError as exc:
             raise HTTPException(422, str(exc))
@@ -133,17 +132,14 @@ async def enroll_face(
     if not enc_list:
         raise HTTPException(422, "Không trích xuất được vector khuôn mặt hợp lệ.")
 
-    # Tính vector trung bình chuẩn hóa nếu có nhiều mẫu ảnh (chuẩn nhận diện đa góc nhìn)
-    avg_vec = np.mean(enc_list, axis=0)
-    norm = np.linalg.norm(avg_vec)
-    if norm > 0:
-        avg_vec = avg_vec / norm
+    # Lưu tất cả các vector thô (không chuẩn hóa L2) dưới dạng list-of-lists
+    raw_vectors = [v.tolist() for v in enc_list]
 
     reference = db.get(FaceReference, student_id)
     if reference is None:
         reference = FaceReference(student_id=student_id, enrolled_by=username, embedding="")
         db.add(reference)
-    reference.embedding = json.dumps(avg_vec.tolist())
+    reference.embedding = json.dumps(raw_vectors)
     reference.consent_at = utcnow()
     reference.enrolled_by = username
     db.commit()

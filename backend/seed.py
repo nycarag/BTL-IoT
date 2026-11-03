@@ -10,6 +10,9 @@ from pathlib import Path
 import numpy as np
 from sqlalchemy import select
 
+import cv2
+from app.services.images import decode_image
+
 from app.core.domain import validate_roster
 from app.database import SessionLocal, init_db
 from app.models import ClassRoom, Student, AttendanceSession, Device
@@ -125,8 +128,9 @@ def main() -> None:
                 if not code:
                     continue
                 try:
-                    img = face_recognition.load_image_file(str(img_file))
-                    encs = face_recognition.face_encodings(img)
+                    frame = decode_image(img_file.read_bytes())
+                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    encs = face_recognition.face_encodings(rgb)
                     if encs:
                         student_encodings.setdefault(code, []).append(encs[0])
                 except Exception as e:
@@ -136,23 +140,21 @@ def main() -> None:
                 student = db.scalar(select(Student).where(Student.student_code == code))
                 if not student:
                     continue
-                # Average encodings if multiple photos exist
-                avg_vec = np.mean(enc_list, axis=0)
-                norm = np.linalg.norm(avg_vec)
-                if norm > 0:
-                    avg_vec = avg_vec / norm
+                # Lưu tất cả các vector thô dưới dạng list-of-lists (không chuẩn hóa L2)
+                raw_vectors = [v.tolist() for v in enc_list]
+                embedding_json = json.dumps(raw_vectors)
 
                 ref = db.get(FaceReference, student.id)
                 if not ref:
                     ref = FaceReference(
                         student_id=student.id,
-                        embedding=json.dumps(avg_vec.tolist()),
+                        embedding=embedding_json,
                         enrolled_by="system_auto_seed",
                         consent_at=utcnow()
                     )
                     db.add(ref)
                 else:
-                    ref.embedding = json.dumps(avg_vec.tolist())
+                    ref.embedding = embedding_json
                     ref.consent_at = utcnow()
                 enrolled_count += 1
                 print(f"  -> Enrolled face for {code}: {student.name} ({len(enc_list)} photo samples)")
