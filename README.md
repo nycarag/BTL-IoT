@@ -60,18 +60,45 @@ Chi tiết các luồng xử lý và giao thức truyền tải xem tại [docs/
    ```
    Giao diện web mở tại cổng 8080 (`http://localhost:8080`), backend API tại cổng 8000 (`http://localhost:8000`). Chi tiết xem tại [docs/docker.md](docs/docker.md).
 
-## Lưu ý nâng cấp từ bản cũ
+## Cấu hình vận hành
 
-- Đăng ký lại khuôn mặt: Bản mới so khớp đa mẫu trên vector thô 128D của dlib thay vì vector chuẩn hóa L2 cũ; dữ liệu cũ vẫn nạp được nhưng sẽ ghi log cảnh báo và giảm độ chính xác.
-- Đặt `SECRET_KEY` cố định trong file `.env`: Tránh để trống khiến máy chủ tự sinh khóa ngẫu nhiên trong bộ nhớ và hủy toàn bộ token đăng nhập sau mỗi lần khởi động lại.
-- Nạp lại firmware ESP32-CAM: Sử dụng mã nguồn trong `firmware/esp32_cam_softap/` phân tách cổng 80 (cấu hình, chụp ảnh `/capture`) và cổng 81 (luồng MJPEG `/stream`).
-- Chế độ `LIVENESS_MODE=off`: Đặt giá trị này trong `.env` khi cần tắt kiểm tra chớp mắt trong trường hợp camera đặt xa, mạng chập chờn hoặc phục vụ thử nghiệm nhanh.
+Các tham số được nạp từ file `.env`, định nghĩa tại `backend/app/core/config.py`:
 
-## Giới hạn đã biết
+| Biến | Mặc định | Vai trò |
+|---|---|---|
+| `SECRET_KEY` | sinh tạm khi trống | Ký token đăng nhập HMAC; cần đặt cố định để token còn hiệu lực sau khi khởi động lại. |
+| `DEVICE_TOKEN` | `esp32_device_secret_token_ptit` | Xác thực camera bridge và ESP32 gửi dữ liệu về backend. Đổi khi triển khai. |
+| `ADMIN_PASSWORD` | `admin123456` | Mật khẩu đăng nhập quản trị viên trên giao diện web. Đổi khi triển khai. |
+| `PAD_REAL_THRESHOLD` | `0.45` | Điểm MiniFASNet tối thiểu để coi là khuôn mặt thật. |
+| `RECOGNITION_THRESHOLD` | `0.52` | Ngưỡng khoảng cách Euclid để chấp nhận khớp khuôn mặt. |
+| `RECOGNITION_MARGIN` | `0.05` | Chênh lệch khoảng cách tối thiểu giữa hai ứng viên gần nhất. |
+| `LIVENESS_MODE` | `blink` | Kiểm tra chớp mắt (blink) hoặc tắt khi thử nghiệm (off). |
+| `STABLE_FRAMES` | `3` | Số khung hình ổn định liên tiếp trước khi nhận diện. |
+| `FRAME_INTERVAL_SECONDS` | `0.3` | Khoảng cách giữa hai khung hình; gửi quá nhanh nhận lỗi 429. |
 
-- EAR chưa ngăn được video phát lại chất lượng cao có người thật đang chớp mắt.
-- Chưa đo kiểm thực địa tỷ lệ FAR và FRR trên tập dữ liệu lớn.
-- Chưa đo kiểm độ ổn định sóng Wi-Fi của ESP32-CAM trong môi trường nhiều vật cản.
+Firmware `firmware/esp32_cam_softap/` phục vụ ảnh chụp và trạng thái ở cổng 80 (`/capture`, `/status`), luồng MJPEG ở cổng 81 (`/stream`).
+
+## Phạm vi chống gian lận và kiểm chứng
+
+| Tình huống | Lớp chặn | Bằng chứng |
+|---|---|---|
+| Ảnh in màu khuôn mặt | MiniFASNetV2 (PAD) | E2E bước 4.3: điểm thật 0.018 < 0.45, từ chối (docs/test-report.md) |
+| Ảnh tĩnh lọt qua PAD | Cổng chớp mắt EAR | E2E bước 3: "liveness: blink required"; test_liveness.py |
+| Hai người cùng trong ROI | Bộ dò khuôn mặt | test_face_detector.py::test_multiple_faces_in_roi |
+| Người đi ngang, khung hình rung | Cổng ổn định 3 frame, IoU ≥ 0.6 | test_pipeline.py::test_stability_resets_on_motion_and_gap |
+| Mặt lạ hoặc hai ứng viên quá gần | Ngưỡng 0.52 + margin 0.05 | test_pipeline.py::test_match_threshold_and_margin |
+| Điểm danh lặp lại | Ràng buộc một bản ghi/phiên | test_api.py::test_manual_attendance_duplicate_csv_and_close |
+
+Hệ thống hiện có 97 bài kiểm thử tự động pytest và kịch bản E2E đạt 14/14 bước thành công.
+
+### Ngoài phạm vi hiện tại
+
+- Video phát lại có chớp mắt thật và deepfake: Chưa có lớp phòng thủ riêng; mới thử nghiệm 1 mẫu ảnh tấn công, chưa đo APCER và BPCER theo chuẩn ISO/IEC 30107-3.
+- Độ chính xác nhận diện: Kịch bản E2E dùng ảnh công khai đo được khoảng cách 0.41 và 0.50 so với ngưỡng 0.52; chưa đo tỷ lệ FAR và FRR trên tập dữ liệu lớn.
+- Bảo mật kênh truyền: Các luồng API và WebSocket chạy qua HTTP chưa bật mã hóa TLS; biến DEVICE_TOKEN dùng chung cho mọi camera.
+- Phần cứng: Cảm biến OV2640 thu nhận kém khi gặp ngược sáng; chưa đo đạc sóng Wi-Fi và độ trễ trên mạch ESP32-CAM thực địa.
+
+Chi tiết hướng mở rộng xem tại Chương 6 báo cáo [docs/BaoCao_BTL_IoT_Nhom05.pdf](docs/BaoCao_BTL_IoT_Nhom05.pdf).
 
 ## Kiểm thử
 

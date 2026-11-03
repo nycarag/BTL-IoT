@@ -47,4 +47,4 @@ ESP32-CAM / Webcam ──(MJPEG/JPEG)──> Camera Bridge ──(HTTP POST)─�
 
 ## 5. Giới hạn hệ thống
 
-Xem chi tiết tại mục [Giới hạn đã biết](../README.md#giới-hạn-đã-biết).
+Xem chi tiết tại mục [Phạm vi chống gian lận và kiểm chứng](../README.md#phạm-vi-chống-gian-lận-và-kiểm-chứng).
