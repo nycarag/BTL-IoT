@@ -173,4 +173,38 @@
   1. Tải chính xác tệp license gốc từ `https://raw.githubusercontent.com/opencv/opencv_zoo/main/models/face_detection_yunet/LICENSE` (1,085 bytes, SHA-256: `c83b8120c50ccbd4c4f96edf53141bdd566ebb8f8e9227e415326aa1b1aba958`) và ghi đè vào `models/yunet/LICENSE` (so sánh byte khớp 100%).
   2. Sửa toàn bộ tài liệu mô tả giấy phép của YuNet sang MIT License (Copyright (c) 2020 Shiqi Yu). Không thay đổi mã nguồn.
 
+## Task T06: Thẩm Định & Chuẩn Hóa Tiền Xử Lý MiniFASNet (PAD)
+
+* **Ngày thực hiện:** 03/11/2026
+* **Nhánh git:** `overhaul/v2`
+
+### Danh sách tệp thay đổi
+
+| Tệp tin | Hành động | Nội dung thay đổi | Lý do kỹ thuật |
+|---|---|---|---|
+| `backend/app/services/antispoof.py` | Chỉnh sửa | 1. Bổ sung hàm `_get_new_box` tuân thủ 100% thuật toán của Minivision (`minivision-ai/Silent-Face-Anti-Spoofing` `src/generate_patches.py`): thay vì cắt cụt box khi ở gần mép ảnh (`max(0, ...)`), thuật toán dịch chuyển box vào trong biên ảnh (`right_bottom_x -= left_top_x`, v.v.), bảo toàn trọn vẹn tỷ lệ aspect ratio và ngữ cảnh khuôn mặt.<br>2. Giữ nguyên toàn bộ quy ước tiền xử lý gốc: BGR, 0..255 float32, không chia 255, không trừ mean/std, tensor shape NCHW `(1, 3, 80, 80)`, class index 1 = Real.<br>3. Trong `AntiSpoofAdapter`: bổ sung hỗ trợ cấu hình số khung hình liên tiếp đạt PAD (`pad_min_consecutive`) theo `device_id` và hàm `reset_device`. | Chuẩn hóa tiền xử lý khuôn mặt khớp tuyệt đối với mô hình gốc được huấn luyện; ngăn chặn biến dạng khuôn mặt ở sát biên ảnh; hỗ trợ lọc nhiễu liên khung hình. |
+| `backend/app/core/config.py` | Chỉnh sửa | Bổ sung biến cấu hình `pad_min_consecutive: int = max(1, int(os.getenv("PAD_MIN_CONSECUTIVE", "1")))`. | Cho phép cấu hình số frame PAD liên tiếp qua biến môi trường. |
+| `backend/.env.example` | Chỉnh sửa | Bổ sung biến mẫu `PAD_MIN_CONSECUTIVE=1`, `PAD_REAL_THRESHOLD=0.45`, `PAD_CROP_SCALE=2.7`. | Hoàn thiện hướng dẫn cấu hình môi trường cho module PAD. |
+| `backend/tests/test_pipeline.py` | Chỉnh sửa | Bổ sung 2 bài unit test mới:<br>1. `test_get_new_box_shifts_instead_of_truncating`: kiểm tra box ở sát biên trái, phải, trên đều được dịch chuyển vào trong ảnh để bảo toàn đúng kích thước mở rộng `box_w * scale`.<br>2. `test_pad_consecutive_frames_requirement`: kiểm tra cơ chế yêu cầu nhiều frame liên tiếp đạt ngưỡng PAD trước khi xác nhận `is_real=True`, và kiểm tra `reset_device`. | Đảm bảo tính đúng đắn thuật toán và ngăn ngừa hồi quy. |
+| `docs/model-evaluation.md` | Chỉnh sửa | 1. Đính chính nhận định sai lầm trong báo cáo P0 (giữ nguyên tỷ lệ mở rộng khuôn mặt của tác giả gốc, không ép vuông).<br>2. Bảng đối chiếu chi tiết 8 bước tiền xử lý với nguồn gốc Minivision và yakhyo.<br>3. Bảng số liệu đo nghiệm thực tế trên tập ảnh mẫu chuẩn (`image_T1.jpg`, `image_F1.jpg`, `image_F2.jpg`) và ảnh chân dung `obama.jpg` (cả bản gốc và bản CIF 400×296).<br>4. Khuyến nghị giữ nguyên ngưỡng mặc định `0.45` từ config, không tự ý thay đổi khi chưa có tập dữ liệu calibration thực địa. | Cung cấp tài liệu thẩm định kỹ thuật đầy đủ, trung thực và khoa học. |
+
+### Kết quả đo nghiệm thực tế mô hình PAD
+
+*Kiểm thử với mô hình ONNX `MiniFASNetV2.onnx`:*
+1. **Ảnh chuẩn của tác giả Minivision:**
+   - `image_T1.jpg` (mặt thật): `is_real = True`, `reason = "PAD passed"`, **score = 0.999956** (~99.99%).
+   - `image_F1.jpg` (mặt giả mạo 1): `is_real = False`, `reason = "spoof or uncertain PAD score"`, **score = 0.003597** (~0.36%).
+   - `image_F2.jpg` (mặt giả mạo 2): `is_real = False`, `reason = "spoof or uncertain PAD score"`, **score = 0.004053** (~0.40%).
+2. **Ảnh chân dung thật:**
+   - `obama.jpg` (chân dung gốc): `is_real = True`, **score = 0.999967**.
+   - `obama_cif.jpg` (ESP32-CAM độ phân giải CIF 400×296): `is_real = True`, **score = 0.999997**.
+3. **Ảnh giả lập màn hình LCD (Moire pattern):**
+   - Thêm lưới sọc tần số cao: score giảm rõ rệt xuống **0.874581**.
+
+### Kết quả kiểm thử tự động
+
+- Lệnh thực thi: `PYTHONPATH=backend pytest backend/tests -q`
+- Kết quả: **69 passed in 5.35s** (toàn bộ 67 bài test trước đó + 2 bài unit test mới cho T06 đều PASS 100%).
+
+
 

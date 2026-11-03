@@ -61,6 +61,7 @@ class Settings:
     pad_model_path: str = os.getenv("PAD_MODEL_PATH", DEFAULT_PAD_MODEL if os.path.exists(DEFAULT_PAD_MODEL) else "")
     pad_real_threshold: float = float(os.getenv("PAD_REAL_THRESHOLD", "0.45"))
     pad_crop_scale: float = float(os.getenv("PAD_CROP_SCALE", "2.7"))
+    pad_min_consecutive: int = max(1, int(os.getenv("PAD_MIN_CONSECUTIVE", "1")))
     recognition_calibrated: bool = os.getenv("RECOGNITION_CALIBRATED", "true").lower() == "true"
     pad_calibrated: bool = os.getenv("PAD_CALIBRATED", "true").lower() == "true"
     cors_origins: tuple[str, ...] = tuple(

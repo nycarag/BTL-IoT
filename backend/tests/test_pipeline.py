@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 
 from app.api.attendance import last_frames
-from app.services.antispoof import AntiSpoofAdapter, prepare_face
+from app.services.antispoof import AntiSpoofAdapter, _get_new_box, prepare_face
 from app.services.face_recognition import RecognitionResult, match
 from app.services.stability import StabilityGate
 from app.services.reporting import attendance_csv
@@ -222,6 +222,69 @@ class PipelineTests(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             decode_image(gif_bytes)
         self.assertIn("Only JPEG and PNG images are accepted", str(ctx.exception))
+
+    def test_get_new_box_shifts_instead_of_truncating(self):
+        # Image 400x300, face box at left boundary x=10, y=100, w=80, h=100
+        # Scale 2.7 -> new_w = 80 * 2.7 = 216, new_h = 100 * 2.7 = 270
+        # Center x = 10 + 40 = 50. Left = 50 - 108 = -58 (< 0).
+        # Minivision shifts box to right so left=0, right = 158 - (-58) = 216.
+        left, top, right, bottom = _get_new_box(400, 300, (10, 100, 80, 100), scale=2.7)
+        self.assertEqual(left, 0)
+        self.assertEqual(right, 216)
+        self.assertEqual(right - left, 216)  # Full width preserved!
+        self.assertGreaterEqual(top, 0)
+        self.assertLessEqual(bottom, 299)
+
+        # Right boundary: x=310, y=100, w=80, h=100 in 400x300
+        # Center x = 350. Right = 350 + 108 = 458 (> 399).
+        # Box is shifted left to keep right = 399.
+        left_r, top_r, right_r, bottom_r = _get_new_box(400, 300, (310, 100, 80, 100), scale=2.7)
+        self.assertEqual(right_r, 399)
+        self.assertEqual(right_r - left_r, 216)  # Full width preserved!
+        self.assertGreaterEqual(left_r, 0)
+
+        # Top boundary: y=5, x=100, w=80, h=80 in 400x300
+        # Center y = 45. Top = 45 - 108 = -63 (< 0).
+        # Box is shifted down so top = 0.
+        left_t, top_t, right_t, bottom_t = _get_new_box(400, 300, (100, 5, 80, 80), scale=2.7)
+        self.assertEqual(top_t, 0)
+        self.assertEqual(bottom_t, 216)
+        self.assertEqual(bottom_t - top_t, 216)  # Full height preserved!
+
+    def test_pad_consecutive_frames_requirement(self):
+        from unittest.mock import MagicMock
+        adapter = AntiSpoofAdapter.__new__(AntiSpoofAdapter)
+        adapter._consecutive_counts = {}
+        adapter.session = MagicMock()
+        adapter.input_name = "input"
+        adapter.output_name = "output"
+        # Logits that result in class 1 (Real) with high probability
+        adapter.session.run.return_value = [np.array([[0.0, 10.0, 0.0]], dtype=np.float32)]
+
+        dummy_frame = np.full((160, 160, 3), 128, dtype=np.uint8)
+        box = (40, 40, 80, 80)
+
+        mock_settings = SimpleNamespace(
+            pad_calibrated=True,
+            pad_real_threshold=0.45,
+            pad_crop_scale=2.7,
+            pad_min_consecutive=2,
+        )
+
+        with patch("app.services.antispoof.settings", mock_settings):
+            # Frame 1: Real frame, but consecutive count = 1 < 2 -> is_real is False
+            res1 = adapter.evaluate(dummy_frame, box, device_id="cam_01")
+            self.assertFalse(res1.is_real)
+            self.assertGreater(res1.score, 0.99)
+
+            # Frame 2: Real frame, consecutive count = 2 >= 2 -> is_real is True
+            res2 = adapter.evaluate(dummy_frame, box, device_id="cam_01")
+            self.assertTrue(res2.is_real)
+
+            # Reset device -> consecutive count resets
+            adapter.reset_device("cam_01")
+            res3 = adapter.evaluate(dummy_frame, box, device_id="cam_01")
+            self.assertFalse(res3.is_real)
 
 
 if __name__ == "__main__":

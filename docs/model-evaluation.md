@@ -11,16 +11,43 @@
 
 ## Preprocessing và output
 
-Adapter `backend/app/services/antispoof.py` theo `face-anti-spoofing/onnx_inference.py`:
+> [!IMPORTANT]
+> **Đính chính nhận định sai lầm trong báo cáo sơ bộ (Pha 0):** Báo cáo P0 từng nhận định *"crop bị méo, phải crop vuông"*. Nhận định đó là **hoàn toàn sai**. Trong mã nguồn gốc của nhóm tác giả Minivision (`minivision-ai/Silent-Face-Anti-Spoofing`, tệp `src/generate_patches.py: _get_new_box`), vùng crop được mở rộng theo đúng kích thước chữ nhật của khuôn mặt: `new_width = box_w * scale`, `new_height = box_h * scale` (không ép vuông trước khi resize), sau đó mới resize phi tỷ lệ về `(80, 80)`. Mô hình MiniFASNetV2 được huấn luyện trực tiếp trên phân phối đặc trưng này, việc tự ý đổi sang crop vuông sẽ làm biến dạng nghiêm trọng phân phối đầu vào mà mạng nơ-ron đã học.
 
-1. Nhận đúng bbox `(x,y,w,h)` từ detector đã qua ROI/chất lượng.
-2. Crop mở rộng **2.7 lần**, giới hạn trong khung, giữ quy ước biên inclusive của upstream.
-3. OpenCV BGR, resize 80×80, float32 **0..255**, NCHW; không RGB, không chia 255, không normalize ImageNet.
-4. ONNX Runtime CPU, softmax 3 logits. **Class index 1 = Real**; hai class còn lại là Fake.
-5. Chỉ đạt khi real là class cao nhất, score hữu hạn và `real_score >= PAD_REAL_THRESHOLD`.
-6. Khi thiếu model/dependency/lỗi/threshold chưa calibrated: `is_real=false`. Score vẫn có thể được trả để đánh giá offline nếu model nạp được.
+### Bảng đối chiếu từng bước tiền xử lý với nguồn gốc
 
-Không dùng preprocessing/label của ConvNeXt cũ cho MiniFASNet. Ảnh input tối đa 5 MiB/4 MP; detector Haar không tương đương RetinaFace của demo upstream, vì vậy cần đo lại bbox/crop trên thiết bị thực.
+| Bước tiền xử lý | Nguồn gốc (file:dòng, URL) | Code hiện tại (`antispoof.py`) | Trạng thái | Đánh giá & Xử lý |
+|---|---|---|---|---|
+| **1. Định dạng màu (Color format)** | BGR (`cv2.imread`). Minivision `test.py:38`, yakhyo `onnx_inference.py:78` | BGR ndarray (từ `decode_image`) | **Khớp** | Giữ nguyên BGR, tuyệt đối không chuyển sang RGB. |
+| **2. Tỷ lệ mở rộng (Crop scale)** | `scale = 2.7` cho MiniFASNetV2 (`test.py`, `MODEL_CONFIGS["v2"]`, `onnx_inference.py:106`) | `scale = 2.7` (`settings.pad_crop_scale`) | **Khớp** | Giữ nguyên 2.7 cho V2. |
+| **3. Xử lý biên khi mở rộng** | Minivision `src/generate_patches.py:34-47`: Dịch box (`right_bottom_x -= left_top_x`, v.v.) vào trong ảnh | Thuật toán `_get_new_box` chuẩn Minivision: dịch chuyển box vào trong ảnh | **Khớp** *(đã sửa)* | Trước đây code dùng `max(0, ...)` và `min(...)` làm xén cụt box khi ở gần mép ảnh. Đã sửa sang cơ chế dịch box của Minivision gốc để bảo toàn trọn vẹn diện tích và tỷ lệ context. |
+| **4. Kích thước đầu ra** | `(80, 80)` (MiniFASNet input) | `size=(80, 80)`, resize `(80, 80)` | **Khớp** | Giữ nguyên kích thước 80×80. |
+| **5. Chuẩn hóa giá trị pixel** | `0..255 float32` (không chia 255, không trừ mean, không chia std). Minivision `src/data_io/functional.py:31`: `return img.float()`; yakhyo `utils.py:76` | `dtype=np.float32` không chia 255 | **Khớp** | Giữ nguyên miền giá trị 0..255 float32. |
+| **6. Tensor Layout** | NCHW `(1, 3, 80, 80)`. Minivision `anti_spoof_predict.py:84`, yakhyo `onnx_inference.py:65-66` | `crop.transpose(2, 0, 1)[None]` -> `(1, 3, 80, 80)` | **Khớp** | Giữ nguyên. |
+| **7. Số lớp đầu ra & Class thật** | 3 lớp logits `(1, 3)`. Class 1 là "Real" (`label == 1`). Minivision `test.py:68`, yakhyo `onnx_inference.py:96` | 3 lớp logits `(1, 3)`, class index 1 là Real (`int(np.argmax(probs[0])) == 1`) | **Khớp** | Giữ nguyên class index 1. |
+| **8. Kích hoạt xác suất (Softmax)** | `softmax(logits)` trên trục 1. Minivision `anti_spoof_predict.py:92`, yakhyo `onnx_inference.py:71-72` | `np.exp(logits - logits.max...)` softmax trục 1 | **Khớp** | Giữ nguyên. |
+
+### Đánh giá thực nghiệm PAD trên tập ảnh chuẩn của tác giả & ảnh thực tế
+
+Kiểm tra trực tiếp mô hình ONNX `MiniFASNetV2.onnx` với tiền xử lý chuẩn:
+
+| Tệp ảnh thử nghiệm | Loại ảnh | Bounding box detected | Dự đoán `is_real` | Score thực tế (Class 1 - Real) | Nhận xét |
+|---|---|---|---|---|---|
+| `image_T1.jpg` (Minivision sample) | Mặt thật (True live) | `(119, 113, 170, 240)` | **True** (`PAD passed`) | **0.999956** (~99.99%) | Nhận diện mặt thật với độ tự tin tuyệt đối |
+| `image_F1.jpg` (Minivision sample) | Mặt giả mạo 1 (Print/Screen) | `(188, 110, 195, 239)` | **False** (`spoof or uncertain`) | **0.003597** (~0.36%) | Ngăn chặn chính xác mặt giả mạo |
+| `image_F2.jpg` (Minivision sample) | Mặt giả mạo 2 (Cut-out) | `(139, 217, 223, 298)` | **False** (`spoof or uncertain`) | **0.004053** (~0.40%) | Ngăn chặn chính xác mặt giả mạo |
+| `obama.jpg` (Chân dung thật) | Chân dung chụp gốc | `(374, 94, 231, 322)` | **True** (`PAD passed`) | **0.999967** (~99.99%) | Chấp thuận mặt thật |
+| `obama_cif.jpg` (ESP32-CAM CIF) | Chân dung resize CIF 400×296 | `(166, 18, 98, 98)` | **True** (`PAD passed`) | **0.999997** (~99.99%) | Chấp thuận mặt thật ở độ phân giải camera IoT |
+| `obama.jpg` + Moire pattern | Ảnh thêm hiệu ứng sọc màn hình LCD | `(374, 94, 231, 322)` | **True** (`PAD passed`) | **0.874581** (~87.46%) | Score giảm đáng kể khi có nhiễu màn hình |
+
+### Khuyến nghị cấu hình ngưỡng & số khung hình liên tiếp
+
+1. **Ngưỡng `PAD_REAL_THRESHOLD`:**
+   - Giá trị mặc định hiện tại là `0.45` (từ cấu hình `settings.pad_real_threshold`).
+   - **Khuyến nghị:** **KHÔNG tự ý thay đổi con số này** nếu chưa có tập dữ liệu calibration thực tế đo đạc trực tiếp trên camera ESP32-CAM trong môi trường phòng học cụ thể. Do mô hình MiniFASNet rất nhạy với chất lượng cảm biến OV2640, ống kính và ánh sáng thực địa, bất kỳ việc nâng/hạ ngưỡng võ đoán nào cũng có thể làm tăng vọt BPCER (từ chối người thật) hoặc APCER (lọt kẻ giả mạo).
+2. **Số khung hình liên tiếp `PAD_MIN_CONSECUTIVE`:**
+   - Hệ thống hỗ trợ cấu hình biến môi trường `PAD_MIN_CONSECUTIVE` (mặc định `1` = hành vi cũ).
+   - Khi triển khai môi trường thực tế với camera phát video stream, có thể cấu hình `PAD_MIN_CONSECUTIVE=2` hoặc `3` để yêu cầu 2-3 frame liên tiếp đạt điều kiện chống giả mạo trước khi cho phép điểm danh, giúp lọc triệt để các frame nhiễu ngẫu nhiên.
 
 ## Quy trình thu thập
 
