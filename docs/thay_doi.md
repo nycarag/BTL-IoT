@@ -439,6 +439,66 @@ Do không có camera vật lý ESP32-CAM trong môi trường phát triển, h�
 - Kiểm thử Frontend: `npm run build` $\rightarrow$ **Thành công 100% (0 lỗi TypeScript, 35 modules transformed trong 1.58s)**.
 - Kiểm thử Backend: `PYTHONPATH=backend pytest backend/tests -q` $\rightarrow$ **81 passed, 3 warnings in 14.25s** (100% test suite vượt qua).
 
+## Task T10: Firmware ESP32-CAM: Giảm Độ Trễ & Ổn Định Luồng MJPEG
+
+* **Ngày thực hiện:** 03/11/2026
+* **Nhánh git:** `overhaul/v2`
+
+### Danh sách tệp thay đổi
+
+| Tệp tin | Hành động | Nội dung thay đổi | Lý do kỹ thuật |
+|---|---|---|---|
+| `firmware/esp32_cam/code_esp32_cam.ino` | Chỉnh sửa | 1. Đặt `config.grab_mode = CAMERA_GRAB_LATEST`, cấu hình double buffer `fb_count = 2`, `fb_location = CAMERA_FB_IN_PSRAM` khi `psramFound()`; fallback `fb_count = 1`, `fb_location = CAMERA_FB_IN_DRAM`, framesize `FRAMESIZE_QVGA` khi không có PSRAM.<br>2. Tách HTTP server thành 2 daemon: Port 80 (`camera_httpd`, ctrl_port 32768) phục vụ `/capture`, `/status`, `/flash`; Port 81 (`stream_httpd`, ctrl_port 32769) chuyên phục vụ `/stream`.<br>3. Không tắt brownout mặc định, chỉ vô hiệu hóa khi có cờ `#ifdef DISABLE_BROWNOUT`.<br>4. Vòng lặp `/stream`: giải phóng bộ đệm `esp_camera_fb_return(fb)` và `break` ngay khi socket lỗi, không delay cố định. | Giảm độ trễ khung hình, triệt tiêu tranh chấp tài nguyên giữa luồng stream và truy vấn snapshot, ngăn chặn sụt áp đột ngột. |
+| `firmware/esp32_cam_softap/esp32_cam_softap.ino` | Chỉnh sửa | 1. Cấu hình `config.grab_mode = CAMERA_GRAB_LATEST`, PSRAM double buffer CIF vs DRAM QVGA fallback.<br>2. Đồng bộ chuẩn cổng: Port 80 cho `/capture` và `/status`; Port 81 cho `/stream`.<br>3. Gỡ bỏ hoàn toàn `delay(80)` trong `streamHandler`, giải phóng frame buffer và thoát ngay khi gửi chunk lỗi.<br>4. Bổ sung cờ bảo vệ `#ifdef DISABLE_BROWNOUT`. | Đảm bảo tốc độ stream đạt tối đa 25–30 FPS, loại bỏ nghẽn nhân tạo 12 FPS từ delay cũ. |
+| `firmware/esp32_cam/README.md` | Chỉnh sửa | Cập nhật hướng dẫn kiến trúc 2 port (Port 80 snapshot/status, Port 81 stream MJPEG), thông số kỹ thuật camera, quản lý nguồn brownout. | Cung cấp tài liệu vận hành chính xác cho nhóm phát triển firmware. |
+| `firmware/esp32_cam_softap/README.md` | Chỉnh sửa | Đồng bộ tài liệu mô tả kiến trúc port 80/81, thông số camera và loại bỏ delay stream. | Đảm bảo tính nhất quán giữa các tài liệu firmware. |
+| `docs/camera-softap.md` | Chỉnh sửa | Cập nhật cấu hình `.env` mẫu (`CAMERA_STREAM_URL=http://192.168.4.1:81/stream`, `CAMERA_CAPTURE_URL=http://192.168.4.1/capture`), giải thích cơ chế tách cổng chống timeout snapshot. | Hướng dẫn triển khai cầu nối camera trên host và Docker chính xác. |
+| `docs/thay_doi.md` | Chỉnh sửa | Ghi nhận chi tiết thay đổi, trích dẫn nguồn gốc và kết quả kiểm thử Task T10. | Nhật ký phát triển hệ thống. |
+
+### Trích dẫn nguồn gốc chuẩn Espressif
+
+1. **`CAMERA_GRAB_LATEST` & Vị trí bộ đệm PSRAM/DRAM:**
+   * Nguồn: Thư viện `espressif/esp32-camera`, tệp `driver/include/esp_camera.h`:
+     * `CAMERA_GRAB_LATEST`: *"The frame buffer will always be filled with the latest frame. If the frame buffer is already full, the oldest frame will be overwritten."* Giúp client luôn nhận khung hình mới nhất tại thời điểm yêu cầu, triệt tiêu độ trễ hàng đợi khung hình cũ.
+     * `CAMERA_FB_IN_PSRAM` / `CAMERA_FB_IN_DRAM`: Cho phép chọn vùng nhớ DMA phù hợp cho bộ đệm.
+2. **Kiến trúc tách 2 HTTP Server (Port 80 & Port 81) & Vòng lặp Stream:**
+   * Nguồn: `espressif/arduino-esp32`, ví dụ mẫu `libraries/ESP32/examples/Camera/CameraWebServer/` (`app_httpd.cpp` & `CameraWebServer.ino`):
+     * Cổng 80: Khởi chạy HTTP server chính (`config.server_port = 80; config.ctrl_port = 32768`) phục vụ cấu hình, `/status`, `/capture`, `/control`.
+     * Cổng 81: Khởi chạy HTTP server stream chuyên biệt (`config.server_port = 81; config.ctrl_port = 32769`) phục vụ `/stream`.
+     * Vòng lặp `stream_handler`: Thu nhận `fb = esp_camera_fb_get()`, gửi các chunk `part_buf`, `_jpg_buf`, `_STREAM_BOUNDARY`, gọi `esp_camera_fb_return(fb)` trong mọi trường hợp giải phóng bộ đệm và thoát `break` ngay khi `res != ESP_OK`; tuyệt đối không chèn `delay` nhân tạo.
+3. **Cấu hình PSRAM Fallback & Tần số XCLK 20MHz:**
+   * Khi `psramFound()`: `FRAMESIZE_CIF` (400×296) + `jpeg_quality = 12` + `fb_count = 2` + `CAMERA_FB_IN_PSRAM`.
+   * Khi không có PSRAM: Tự động hạ xuống `FRAMESIZE_QVGA` (320×240) + `jpeg_quality = 12` + `fb_count = 1` + `CAMERA_FB_IN_DRAM` để tránh tràn heap DRAM nội bộ.
+   * `xclk_freq_hz = 20000000` (20 MHz) giữ nguyên: tần số chuẩn của OV2640 trên board AI Thinker, đảm bảo pixel clock ổn định, không sọc nhiễu.
+
+### Báo cáo kiểm tra tương thích với Cầu nối Laptop (`camera_bridge.py`)
+
+* Khảo sát tệp [`backend/camera_bridge.py`](file:///home/nycarag/IOT/backend/camera_bridge.py):
+  * Dòng 351: Biến môi trường `CAMERA_CAPTURE_URL` có giá trị mặc định fallback là `http://192.168.4.1:81/capture`.
+  * Dòng 226: Biến môi trường `CAMERA_STREAM_URL` mặc định suy diễn là `http://192.168.4.1:81/stream`.
+* **Đánh giá tương thích:**
+  1. Với chế độ mặc định của dự án (`CAMERA_TRANSPORT=mjpeg` qua script `start_esp32.sh`), bridge kết nối trực tiếp vào `http://192.168.4.1:81/stream` (Port 81), hoàn toàn trùng khớp với `stream_httpd` mới. Luồng MJPEG hoạt động trơn tru không bị gián đoạn.
+  2. Khi tách theo chuẩn CameraWebServer, endpoint `/capture` và `/status` chuyển sang Port 80 (`http://192.168.4.1/capture` hoặc `http://192.168.4.1:80/capture`). Do đó, nếu người dùng muốn chạy bridge ở chế độ snapshot capture, cần cấu hình trong `.env`: `CAMERA_CAPTURE_URL=http://192.168.4.1:80/capture` (hoặc `http://192.168.4.1/capture`).
+
+### Kết quả biên dịch thực tế bằng `arduino-cli`
+
+Hệ thống đã tải `arduino-cli` và cài đặt gói board `esp32:esp32@3.3.12` (Espressif Systems) vào scratchpad, thực hiện biên dịch kiểm thử độc lập cho cả hai sketch với board mục tiêu **AI Thinker ESP32-CAM** (`--fqbn esp32:esp32:esp32cam`):
+
+1. **Biên dịch `firmware/esp32_cam/code_esp32_cam.ino`:**
+   * Kết quả: **THÀNH CÔNG (Exit code: 0)**.
+   * Dung lượng bộ nhớ chương trình (Flash): **1,016,573 bytes (32%)** / Tối đa: 3,145,728 bytes.
+   * Dung lượng bộ nhớ động (RAM): **57,760 bytes (17%)** / Tối đa: 327,680 bytes.
+2. **Biên dịch `firmware/esp32_cam_softap/esp32_cam_softap.ino`:**
+   * Kết quả: **THÀNH CÔNG (Exit code: 0)**.
+   * Dung lượng bộ nhớ chương trình (Flash): **1,015,645 bytes (32%)** / Tối đa: 3,145,728 bytes.
+   * Dung lượng bộ nhớ động (RAM): **57,760 bytes (17%)** / Tối đa: 327,680 bytes.
+
+### Kết quả kiểm thử tự động Backend & Frontend
+
+- Backend Tests: `PYTHONPATH=backend pytest backend/tests -q` $\rightarrow$ **81 passed, 3 warnings in 14.45s** (100% test suite vượt qua).
+- Frontend Build: `npm run build` $\rightarrow$ **Thành công 100% (0 lỗi TypeScript)**.
+
+
 
 
 

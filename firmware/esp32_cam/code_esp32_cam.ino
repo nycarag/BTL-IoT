@@ -37,6 +37,7 @@ static const char* _STREAM_CONTENT_TYPE = "multipart/x-mixed-replace;boundary=fr
 static const char* _STREAM_BOUNDARY = "\r\n--frame_boundary\r\n";
 static const char* _STREAM_PART = "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n";
 
+httpd_handle_t camera_httpd = NULL;
 httpd_handle_t stream_httpd = NULL;
 
 // 1. XU LY STREAM VIDEO MJPEG LIEN TUC
@@ -51,6 +52,7 @@ static esp_err_t stream_handler(httpd_req_t *req) {
     if(res != ESP_OK) return res;
 
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_set_hdr(req, "X-Framerate", "30");
 
     while(true) {
         fb = esp_camera_fb_get();
@@ -74,8 +76,10 @@ static esp_err_t stream_handler(httpd_req_t *req) {
             esp_camera_fb_return(fb);
             fb = NULL;
             _jpg_buf = NULL;
+        } else if(res == ESP_OK) {
+            res = ESP_FAIL;
         }
-        // Neu client dong ket noi hoac loi mang -> THOAT NGAY de giai phong bo dem
+        // Neu client dong ket noi hoac gui chunk loi -> THOAT NGAY lap tuc
         if(res != ESP_OK) {
             break;
         }
@@ -93,12 +97,29 @@ static esp_err_t capture_handler(httpd_req_t *req) {
     httpd_resp_set_type(req, "image/jpeg");
     httpd_resp_set_hdr(req, "Content-Disposition", "inline; filename=capture.jpg");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store, private");
     esp_err_t res = httpd_resp_send(req, (const char *)fb->buf, fb->len);
     esp_camera_fb_return(fb);
     return res;
 }
 
-// 3. XU LY NHAY DEN FLASH KHI DIEM DANH THANH CONG (/flash)
+// 3. XU LY THONG TIN TRANG THAI CAM BIEN (/status) GIONG CameraWebServer
+static esp_err_t status_handler(httpd_req_t *req) {
+    static char json_response[128];
+    sensor_t * s = esp_camera_sensor_get();
+    if (s == NULL) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    snprintf(json_response, sizeof(json_response),
+             "{\"framesize\":%u,\"quality\":%u,\"psram\":%s}",
+             s->status.framesize, s->status.quality, psramFound() ? "true" : "false");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    return httpd_resp_send(req, json_response, strlen(json_response));
+}
+
+// 4. XU LY NHAY DEN FLASH KHI DIEM DANH THANH CONG (/flash)
 void flash_task(void *pvParameters) {
     digitalWrite(FLASH_GPIO_NUM, HIGH); // Bat den Flash
     vTaskDelay(pdMS_TO_TICKS(150));     // Sang trong 150ms
@@ -116,20 +137,23 @@ static esp_err_t flash_handler(httpd_req_t *req) {
 
 void startCameraServer() {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.server_port = 81;
-    config.ctrl_port = 32768;
+    config.max_uri_handlers = 8;
 
-    httpd_uri_t stream_uri = {
-        .uri       = "/stream",
-        .method    = HTTP_GET,
-        .handler   = stream_handler,
-        .user_ctx  = NULL
-    };
+    // Server 1 (Port 80): phuc vu /capture, /status, /flash (giong CameraWebServer)
+    config.server_port = 80;
+    config.ctrl_port = 32768;
 
     httpd_uri_t capture_uri = {
         .uri       = "/capture",
         .method    = HTTP_GET,
         .handler   = capture_handler,
+        .user_ctx  = NULL
+    };
+
+    httpd_uri_t status_uri = {
+        .uri       = "/status",
+        .method    = HTTP_GET,
+        .handler   = status_handler,
         .user_ctx  = NULL
     };
 
@@ -140,16 +164,34 @@ void startCameraServer() {
         .user_ctx  = NULL
     };
 
+    if (httpd_start(&camera_httpd, &config) == ESP_OK) {
+        httpd_register_uri_handler(camera_httpd, &capture_uri);
+        httpd_register_uri_handler(camera_httpd, &status_uri);
+        httpd_register_uri_handler(camera_httpd, &flash_uri);
+    }
+
+    // Server 2 (Port 81): tach rieng chuyen phuc vu /stream video MJPEG
+    config.server_port = 81;
+    config.ctrl_port = 32769;
+
+    httpd_uri_t stream_uri = {
+        .uri       = "/stream",
+        .method    = HTTP_GET,
+        .handler   = stream_handler,
+        .user_ctx  = NULL
+    };
+
     if (httpd_start(&stream_httpd, &config) == ESP_OK) {
         httpd_register_uri_handler(stream_httpd, &stream_uri);
-        httpd_register_uri_handler(stream_httpd, &capture_uri);
-        httpd_register_uri_handler(stream_httpd, &flash_uri);
     }
 }
 
 void setup() {
-    // TAT BROWNOUT DETECTOR (CHONG SAP NGUON)
+#ifdef DISABLE_BROWNOUT
+    // Canh bao: Chi tat brownout detector khi nguon cap 5V yeu/sut ap luc phat Wi-Fi.
+    // Khuyen nghi phan cung: dung nguon 5V/2A on dinh va gan tu loc 100uF-470uF.
     WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+#endif
 
     Serial.begin(9600);
     delay(500);
@@ -182,9 +224,22 @@ void setup() {
     config.pin_reset = RESET_GPIO_NUM;
     config.xclk_freq_hz = 20000000;
     config.pixel_format = PIXFORMAT_JPEG;
-    config.frame_size = FRAMESIZE_CIF; // 400x296: Sieu muot 25-30 FPS, do tre cuc thap, giam nong mach
-    config.jpeg_quality = 12;
-    config.fb_count = 2;
+    config.grab_mode = CAMERA_GRAB_LATEST;
+
+    // Kiem tra ho tro PSRAM de toi uu hoa frame buffer
+    // Nguon: CameraWebServer.ino trong arduino-esp32 & esp_camera.h
+    if (psramFound()) {
+        config.frame_size = FRAMESIZE_CIF;  // 400x296: do phan giai toi uu nhe may 25-30 FPS
+        config.jpeg_quality = 12;           // 10-12 la dai tieu chuan cua CameraWebServer
+        config.fb_count = 2;                // Double buffer trong PSRAM tranh xe hinh
+        config.fb_location = CAMERA_FB_IN_PSRAM;
+    } else {
+        // Fallback khi board khong co hoac khong nhan PSRAM: dung DRAM noi bo
+        config.frame_size = FRAMESIZE_QVGA; // 320x240 de tranh tran DRAM
+        config.jpeg_quality = 12;
+        config.fb_count = 1;                // 1 buffer trong DRAM
+        config.fb_location = CAMERA_FB_IN_DRAM;
+    }
 
     // Khoi tao camera
     esp_err_t err = esp_camera_init(&config);
@@ -234,7 +289,10 @@ void setup() {
     Serial.println(ap_password);
     Serial.print("DIA CHI IP CO DINH: ");
     Serial.println(WiFi.softAPIP());
-    Serial.print("LINK STREAM VIDEO: http://");
+    Serial.print("PORT 80 (CAPTURE/STATUS): http://");
+    Serial.print(WiFi.softAPIP());
+    Serial.println("/capture");
+    Serial.print("PORT 81 (STREAM MJPEG):    http://");
     Serial.print(WiFi.softAPIP());
     Serial.println(":81/stream");
     Serial.println("========================================\n");

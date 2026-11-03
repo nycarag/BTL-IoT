@@ -43,10 +43,10 @@ Nhấn Ctrl+C để dừng cầu nối. Dừng không tạo attendance offline. 
 
 ## Biến cấu hình `.env` gốc
 
-Mặc định tương thích firmware cũ, không bắt buộc thêm nếu dùng địa chỉ mặc định:
+Cấu hình mẫu tương thích firmware ESP32-CAM chuẩn hóa (Port 80 cho capture/status, Port 81 cho stream MJPEG):
 
 ```dotenv
-CAMERA_CAPTURE_URL=http://192.168.4.1:81/capture
+CAMERA_CAPTURE_URL=http://192.168.4.1/capture
 CAMERA_TRANSPORT=mjpeg
 CAMERA_STREAM_URL=http://192.168.4.1:81/stream
 CAMERA_PREVIEW_FPS=15
@@ -57,6 +57,12 @@ CAMERA_TIMEOUT_SECONDS=5
 # Cầu nối host, nếu backend port khác 8000:
 BRIDGE_BACKEND_URL=http://127.0.0.1:8000
 ```
+
+> [!TIP]
+> **Về việc tách Port HTTP server:**
+> * Cả hai firmware trong `firmware/` đều khởi chạy 2 HTTP daemon riêng biệt: **Port 80** phục vụ snapshot `/capture` và trạng thái `/status`; **Port 81** chuyên phục vụ luồng video `/stream`.
+> * Chế độ mặc định `CAMERA_TRANSPORT=mjpeg` của cầu nối đọc trực tiếp từ `CAMERA_STREAM_URL=http://192.168.4.1:81/stream` (port 81).
+> * Nếu chuyển sang chế độ snapshot capture (`CAMERA_TRANSPORT=capture`), đặt `CAMERA_CAPTURE_URL=http://192.168.4.1/capture` (cổng 80) để không làm nghẽn luồng stream.
 
 Token dùng `DEVICE_TOKEN` hiện có, không cần ADMIN_PASSWORD. Không gửi token/mật khẩu lên chat. Sau khi sửa `.env`, restart cầu nối. Nếu có sẵn env shell cùng tên, nó ưu tiên hơn file.
 
@@ -81,8 +87,8 @@ Nếu host mở snapshot được nhưng container không đọc được vì Do
 
 ## Chẩn đoán
 
-- Không vào được `192.168.4.1:81/capture`: kiểm tra đang kết nối đúng Wi-Fi, board có nguồn ổn định, firmware có `/capture`, tắt VPN/proxy cho mạng camera nếu cần. Cầu nối bỏ qua HTTP proxy hệ thống cho traffic cục bộ.
-- Capture timeout khi `/stream` mở: đóng stream; firmware cũ dùng chung HTTP server. Sketch SoftAP mới trong BTL-new tách stream sang port 82.
+- Không vào được `192.168.4.1/capture`: kiểm tra đang kết nối đúng Wi-Fi, board có nguồn ổn định, firmware có `/capture` (cổng 80), tắt VPN/proxy cho mạng camera nếu cần. Cầu nối bỏ qua HTTP proxy hệ thống cho traffic cục bộ.
+- Capture timeout khi `/stream` mở: firmware mới đã tách riêng 2 server (port 80 cho capture/status, port 81 cho stream MJPEG) theo chuẩn CameraWebServer của Espressif, triệt tiêu hiện tượng tranh chấp kết nối.
 - `HTTP 401`: DEVICE_TOKEN cầu nối và backend không trùng. Docker đọc `.env` gốc, không đọc `backend/.env`.
 - `HTTP 409`: assignment/phiên vừa thay đổi hoặc phiên đóng; cầu nối reload config và không mặc định thành công.
 - `HTTP 429`: có nguồn frame thứ hai hoặc chu kỳ quá nhanh; dừng nguồn thừa/điều chỉnh interval.

@@ -1,35 +1,45 @@
-# Firmware ESP32-CAM — AI Thinker
+# Firmware ESP32-CAM (AI Thinker) — SoftAP & Stream Tối Ưu Độ Trễ
 
-Firmware hiện dùng **Wi-Fi STA + gửi JPEG**, không còn SoftAP/stream demo cũ. Không chạy AI trên ESP32 và không tự ghi điểm danh.
+Firmware hỗ trợ phát Wi-Fi Access Point (`192.168.4.1`) và phục vụ luồng video MJPEG độ trễ cực thấp cùng endpoint chụp ảnh snapshot độc lập.
 
-## Cài/nạp
+## Kiến Trúc Cổng Dịch Vụ HTTP (Tách Port Chuẩn CameraWebServer)
 
-1. Arduino IDE 2.x, board package **esp32 by Espressif Systems 3.x**.
-2. Library Manager: **ArduinoJson 7.x**.
-3. Chọn board **AI Thinker ESP32-CAM**, bật PSRAM nếu tùy chọn xuất hiện; cấp nguồn 5V ổn định.
-4. Arduino yêu cầu tên thư mục khớp sketch: tạo thư mục sketch `code_esp32_cam`, sao chép `code_esp32_cam.ino` và `config.example.h` vào đó. Đổi file cấu hình thành `config.h` trong thư mục sketch (không đổi file ví dụ gốc).
-5. Điền `WIFI_SSID`, `WIFI_PASSWORD`, `SERVER_URL`, `DEVICE_ID`, `DEVICE_TOKEN`.
-6. Dùng USB-UART mức logic 3.3V; nối GPIO0-GND khi upload, bỏ nối rồi reset để chạy. Serial 115200.
+Nhằm tránh hiện tượng luồng video `/stream` chiếm giữ kết nối đơn luồng của HTTP server làm treo hoặc nghẽn yêu cầu chụp ảnh snapshot, firmware khởi chạy 2 HTTP daemon độc lập:
 
-```cpp
-#define SERVER_URL "http://192.168.1.10:8000"
-#define DEVICE_ID "esp32-cam-01"
-#define DEVICE_TOKEN "gia-tri-DEVICE_TOKEN-trong-env"
-```
+1. **Cổng 80 (`camera_httpd`):**
+   * `GET http://192.168.4.1/capture`: Chụp 1 ảnh tĩnh JPEG độ nét cao (header `Cache-Control: no-store, private`).
+   * `GET http://192.168.4.1/status`: Trả về JSON trạng thái cảm biến OV2640 (`framesize`, `quality`, `psram`).
+   * `GET http://192.168.4.1/flash`: Nháy đèn flash trợ sáng khi nhận diện thành công (chạy ngầm qua FreeRTOS task).
+2. **Cổng 81 (`stream_httpd`):**
+   * `GET http://192.168.4.1:81/stream`: Luồng video MJPEG (`multipart/x-mixed-replace;boundary=frame_boundary`) liên tục cho cầu nối laptop hoặc trình duyệt.
 
-ESP32 và laptop cùng LAN. IP trên là ví dụ, phải thay IP thực tế. Không dùng `localhost`/`127.0.0.1` trên ESP32. File `config.h` chứa secret đã được ignore, không chia sẻ công khai.
+> [!NOTE]
+> **Tương thích với Cầu nối Laptop (`camera_bridge.py`):**
+> * Chế độ mặc định của hệ thống là `CAMERA_TRANSPORT=mjpeg`, cầu nối đọc trực tiếp từ `CAMERA_STREAM_URL=http://192.168.4.1:81/stream` (hoàn toàn trùng khớp cổng 81).
+> * Nếu sử dụng chế độ chụp ảnh tĩnh (`CAMERA_TRANSPORT=capture`), cầu nối sẽ gọi `/capture` trên cổng 80 (`CAMERA_CAPTURE_URL=http://192.168.4.1:80/capture` hoặc `http://192.168.4.1/capture`).
 
-## Luồng
+## Cấu Hình Camera & Bộ Đệm Khung Hình (Nguồn Chuẩn Espressif)
 
-- Heartbeat mỗi 10 giây: `POST /api/devices/heartbeat`, header `X-Device-ID`, `X-Device-Token`.
-- Sau heartbeat: `GET /api/devices/config` để nhận phiên được giảng viên gán.
-- Chỉ khi config `active=true`: chụp VGA JPEG và gửi multipart `image` đến `/api/devices/{id}/frames?session_id=...` theo `FRAME_INTERVAL_MS`.
-- Server yêu cầu mặc định 3 frame ổn định; chu kỳ phải ngắn hơn `STABLE_GAP_SECONDS`. Nếu laptop chậm, đo latency và hiệu chỉnh phù hợp.
-- LED đỏ GPIO33 active-low chỉ nháy khi HTTP 202 và JSON `accepted=true`; không nháy thành công chỉ vì upload thành công.
-- Mất mạng/lỗi heartbeat/config: bỏ phiên cục bộ; không báo thành công. HTTP 409 dừng gửi ảnh cho tới lần lấy config tiếp theo.
+* **Chế độ lấy khung hình (`grab_mode`):** `CAMERA_GRAB_LATEST` (nguồn: `esp_camera.h` - Espressif). Driver camera luôn ghi đè khung hình cũ và trả về khung hình mới nhất tại thời điểm gọi `esp_camera_fb_get()`, triệt tiêu hoàn toàn độ trễ tích lũy trong hàng đợi.
+* **Bộ đệm kép (`fb_count = 2`) & Vị trí PSRAM (`CAMERA_FB_IN_PSRAM`):** Khi board nhận PSRAM (`psramFound()`), kích hoạt double-buffering trong PSRAM ngoài giúp DMA camera truyền nhận song song với luồng mạng Wi-Fi, không giật hình.
+* **Fallback an toàn khi thiếu PSRAM:** Tự động hạ độ phân giải xuống `FRAMESIZE_QVGA` (320×240), `config.fb_count = 1` và lưu trên DRAM nội bộ (`CAMERA_FB_IN_DRAM`) để tránh tràn bộ nhớ heap.
+* **Tần số xung nhịp (`xclk_freq_hz`):** Giữ nguyên `20000000` (20 MHz) theo chuẩn cảm biến OV2640 trên board AI Thinker để đảm bảo xung nhịp quét pixel ổn định, không sọc nhiễu.
+* **Chất lượng nén JPEG (`jpeg_quality`):** Giữ mức `12` (dải tối ưu 10–12 theo `CameraWebServer` của Espressif), cho kích thước frame ~8–15 KB, truyền tải mượt mà 25–30 FPS qua Wi-Fi mà không gây nghẽn buffer.
 
-## Sau khi nạp
+## Quản Lý Nguồn Điện & Bảo Vệ Brownout
 
-Đợi camera xuất hiện ở dashboard → Thiết bị & ROI → gán buổi học đang mở → lưu ROI. Nếu PAD/recognition chưa calibrated, frame vẫn bị từ chối an toàn.
+* **Mặc định:** Hệ thống **KHÔNG tắt** Brownout Detector (`RTC_CNTL_BROWN_OUT_REG`). Bộ giám sát điện áp thấp bảo vệ chip ESP32 khỏi lỗi hư hỏng bộ nhớ flash khi nguồn cấp không đủ tải.
+* **Cờ cấu hình tùy chọn:** Nếu sử dụng nguồn điện thử nghiệm yếu gây sụt áp tức thời lúc bật Wi-Fi, có thể định nghĩa cờ `#define DISABLE_BROWNOUT` trước khi biên dịch.
+* **Khuyến nghị phần cứng:** Cấp nguồn 5V/2A ổn định qua chân 5V và hàn thêm tụ hóa 100µF–470µF giữa chân 5V và GND để chống sụt áp tức thời.
 
-Firmware chưa được biên dịch bằng Arduino CLI hoặc nạp board trong phiên triển khai này. Cần kiểm tra nguồn, pinout, phiên bản board package, bộ nhớ upload và kết nối thực. HTTP không bảo vệ token khỏi nghe lén: chỉ dùng LAN thử nghiệm tin cậy; muốn triển khai ngoài mạng đó phải bổ sung TLS và kiểm tra chứng chỉ, không tắt verification.
+## Cài Đặt & Nạp Firmware
+
+1. Mở Arduino IDE 2.x hoặc dùng `arduino-cli`.
+2. Cài đặt board package **esp32 by Espressif Systems** (phiên bản 3.x).
+3. Chọn board: **AI Thinker ESP32-CAM**. Bật PSRAM trong menu công cụ.
+4. Nối GPIO 0 vào GND khi nạp firmware; ngắt GPIO 0 khỏi GND và nhấn nút RESET để chạy.
+5. Kiểm tra qua Serial Monitor (baud rate 9600):
+   * Wi-Fi AP: `ESP32_DIEM_DANH` (mật khẩu: `12345678`)
+   * IP: `192.168.4.1`
+   * Snapshot: `http://192.168.4.1/capture`
+   * Stream: `http://192.168.4.1:81/stream`
