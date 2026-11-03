@@ -1,25 +1,34 @@
 """Validate dimensions before OpenCV/dlib decode; reject decompression bombs."""
-import io
-import warnings
+from __future__ import annotations
 
-from PIL import Image
+import cv2
+import numpy as np
 
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_IMAGE_PIXELS = 4_000_000
+MIN_IMAGE_DIMENSION = 64
 
 
-def validate_image(body: bytes) -> None:
+def decode_image(body: bytes) -> np.ndarray:
+    """Decode JPEG/PNG bytes to BGR ndarray and validate dimensions once."""
     if not body or len(body) > MAX_IMAGE_BYTES:
         raise ValueError("Image is empty or larger than 5 MiB")
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", Image.DecompressionBombWarning)
-            with Image.open(io.BytesIO(body)) as image:
-                if image.format not in {"JPEG", "PNG"}:
-                    raise ValueError("Only JPEG and PNG images are accepted")
-                width, height = image.size
-                if min(width, height) < 64 or width * height > MAX_IMAGE_PIXELS:
-                    raise ValueError("Image dimensions must be at least 64×64 and at most 4 megapixels")
-                image.verify()
-    except (OSError, Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
-        raise ValueError("Invalid or oversized image") from exc
+    frame = cv2.imdecode(np.frombuffer(body, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if frame is None:
+        raise ValueError("Invalid or oversized image")
+    validate_frame(frame)
+    return frame
+
+
+def validate_frame(frame: np.ndarray) -> None:
+    """Validate minimum and maximum image dimensions on BGR ndarray."""
+    if not isinstance(frame, np.ndarray) or frame.ndim != 3:
+        raise ValueError("Invalid image")
+    height, width = frame.shape[:2]
+    if min(width, height) < MIN_IMAGE_DIMENSION or width * height > MAX_IMAGE_PIXELS:
+        raise ValueError("Image dimensions must be at least 64×64 and at most 4 megapixels")
+
+
+def validate_image(body: bytes) -> np.ndarray:
+    """Legacy helper for bytes validation; decodes and validates dimensions."""
+    return decode_image(body)

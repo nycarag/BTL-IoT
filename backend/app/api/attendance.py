@@ -22,7 +22,7 @@ from app.services.face_detector import FaceDetector
 from app.services.face_recognition import FaceRecognitionAdapter, match
 from app.services.attendance_service import record_attendance
 from app.services.stability import gate
-from app.services.images import MAX_IMAGE_BYTES, validate_image
+from app.services.images import MAX_IMAGE_BYTES, decode_image, validate_image
 from app.services.websocket import manager
 from app.services.camera_preview import previews
 from app.services.audio_service import play_attendance_sound
@@ -108,7 +108,7 @@ async def _process_frame(device_id, image, session_id, db):
     if len(body) > MAX_IMAGE_BYTES:
         raise HTTPException(413, "Image is too large")
     try:
-        validate_image(body)
+        frame = decode_image(body)
     except ValueError as exc:
         gate.reset((device_id, session_id))
         await event(db, session_id, device_id, "rejected", str(exc))
@@ -127,14 +127,14 @@ async def _process_frame(device_id, image, session_id, db):
     roi = (config.roi_left, config.roi_top, config.roi_right, config.roi_bottom)
     key = (device_id, session_id)
     try:
-        detection, reason = await run_in_threadpool(lambda: _detector().detect_largest(body, roi))
+        detection, reason = await run_in_threadpool(lambda: _detector().detect_largest(frame, roi))
         if detection is None or reason != "ok":
             gate.reset(key)
             await event(db, session_id, device_id, "rejected", f"detector: {reason}")
             return respond({"accepted": False, "reason": reason}, detection)
         if not gate.observe(key, detection.box):
             return respond({"accepted": False, "reason": "waiting for stable face"}, detection)
-        pad = await run_in_threadpool(lambda: _pad().evaluate(body, detection.box))
+        pad = await run_in_threadpool(lambda: _pad().evaluate(frame, detection.box))
         if not pad.is_real:
             await event(db, session_id, device_id, "rejected", f"pad: {pad.reason}; real_score={pad.score}")
             return respond({"accepted": False, "reason": pad.reason, "pad_score": pad.score}, detection)
@@ -142,7 +142,7 @@ async def _process_frame(device_id, image, session_id, db):
         if not getattr(rec, "ready", False):
             recognition = None
         else:
-            probe = await run_in_threadpool(rec.encode, body, detection.box)
+            probe = await run_in_threadpool(rec.encode, frame, detection.box)
             rows = db.execute(
                 select(FaceReference, Student).join(Student, Student.id == FaceReference.student_id)
                 .where(Student.class_id == session.class_id)

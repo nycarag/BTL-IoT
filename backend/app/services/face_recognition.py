@@ -1,11 +1,11 @@
 """Optional dlib embeddings; stored references come only from consented enrollment."""
 from __future__ import annotations
 
-import io
 import json
 import logging
 from dataclasses import dataclass
 
+import cv2
 import numpy as np
 
 from app.core.config import settings
@@ -91,12 +91,18 @@ class FaceRecognitionAdapter:
     def ready(self):
         return self.engine is not None and settings.recognition_calibrated
 
-    def encode(self, image_bytes: bytes, box=None):
+    def encode(self, frame: np.ndarray | bytes, box=None):
         if self.engine is None:
             raise ValueError(self.reason)
-        image = self.engine.load_image_file(io.BytesIO(image_bytes))
+        if isinstance(frame, bytes):
+            from app.services.images import decode_image
+            frame = decode_image(frame)
+        elif not isinstance(frame, np.ndarray) or frame.ndim != 3:
+            raise ValueError("Invalid image")
+
+        rgb_image = np.ascontiguousarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), dtype=np.uint8)
         if box is None:
-            locations = self.engine.face_locations(image)
+            locations = self.engine.face_locations(rgb_image)
             if len(locations) == 0:
                 raise ValueError("Không tìm thấy khuôn mặt trong ảnh. Vui lòng nhìn thẳng và đủ sáng.")
             if len(locations) > 1:
@@ -104,7 +110,7 @@ class FaceRecognitionAdapter:
         else:
             x, y, w, h = box
             locations = [(y, x + w, y + h, x)]
-        encodings = self.engine.face_encodings(image, locations)
+        encodings = self.engine.face_encodings(rgb_image, locations)
         if len(encodings) != 1 or not np.isfinite(encodings[0]).all():
             raise ValueError("Không thể trích xuất đặc trưng khuôn mặt từ ảnh.")
         return encodings[0]

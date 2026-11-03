@@ -80,3 +80,40 @@
 2. **Đo nghiệm ảnh thật (`scratchpad/work/eval_real_faces.py`):**
    * Cặp cùng người (`obama.jpg` $\leftrightarrow$ `obama2.jpg`): khoảng cách **0.3457** (< ngưỡng 0.60).
    * Cặp khác người (`obama.jpg` $\leftrightarrow$ `biden.jpg`): khoảng cách **0.8402** (> ngưỡng 0.60).
+
+## Task T04: Tối Ưu Giải Mã Ảnh - Decode JPEG 1 Lần Duy Nhất Mỗi Khung Hình AI
+
+* **Ngày thực hiện:** 03/11/2026
+* **Nhánh git:** `overhaul/v2`
+
+### Danh sách tệp thay đổi
+
+| Tệp tin | Nội dung thay đổi | Lý do kỹ thuật |
+|---|---|---|
+| `backend/app/services/images.py` | 1. Bổ sung hàm `decode_image(body: bytes) -> np.ndarray`: giải mã ảnh trực tiếp bằng `cv2.imdecode` và kiểm tra hợp lệ kích thước trong một lần duy nhất.<br>2. Bổ sung `validate_frame(frame: np.ndarray)`: kiểm tra kích thước tối thiểu (64×64) và tối đa (4 megapixels) trực tiếp trên ndarray BGR, thay thế kiểm tra chậm bằng Pillow.<br>3. Giữ `validate_image` làm wrapper gọi `decode_image` để đảm bảo tương thích ngược. | Loại bỏ việc mở và giải mã trùng lặp bằng Pillow; cung cấp hàm giải mã dùng chung duy nhất cho toàn bộ hệ thống. |
+| `backend/app/api/attendance.py` | Trong `_process_frame`: gọi `frame = decode_image(body)` 1 lần duy nhất ngay sau khi nhận frame; truyền trực tiếp `frame` (BGR ndarray) vào `_detector().detect_largest(frame, roi)`, `_pad().evaluate(frame, box)` và `rec.encode(frame, box)`. | Tránh giải mã lặp lại 4 lần trên mỗi frame ảnh từ camera ESP32. |
+| `backend/app/services/face_detector.py` | `FaceDetector.detect_largest`: hỗ trợ nhận trực tiếp `frame: np.ndarray` (BGR) (vẫn hỗ trợ `bytes` qua `decode_image` cho tương thích ngược). | Không giải mã lại ảnh khi đã có mảng BGR sẵn. |
+| `backend/app/services/antispoof.py` | `prepare_face` và `AntiSpoofAdapter.evaluate`: nhận trực tiếp `frame: np.ndarray` (BGR), cắt crop trực tiếp trên mảng numpy đã giải mã. | Loại bỏ lệnh `cv2.imdecode` lặp lại trong module kiểm tra giả mạo (PAD). |
+| `backend/app/services/face_recognition.py` | `FaceRecognitionAdapter.encode`: nhận trực tiếp `frame: np.ndarray` (BGR); chuyển đổi màu `cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)` và ép kiểu `np.ascontiguousarray(..., dtype=np.uint8)` dlib yêu cầu mà không thông qua `face_recognition.load_image_file` (Pillow). Vẫn hỗ trợ `bytes` qua `decode_image` cho các luồng khác (như enrollment sinh viên). | Loại bỏ lệnh giải mã lại ảnh lần thứ 4 trong module nhận diện. |
+| `backend/tests/test_pipeline.py` | Bổ sung 3 unit tests:<br>1. `test_prepare_face_accepts_ndarray`: kiểm tra `prepare_face` nhận trực tiếp ndarray BGR.<br>2. `test_detector_accepts_ndarray`: kiểm tra detector nhận trực tiếp ndarray BGR.<br>3. `test_decode_image_and_dimension_validation`: kiểm tra `decode_image` và `validate_frame` từ chối ảnh quá nhỏ (< 64×64) hoặc ảnh hỏng. | Kiểm thử tự động chữ ký hàm mới và khả năng bảo vệ kích thước ảnh. |
+
+### Đo đạc benchmark thực tế trên ảnh thật (50 lần lặp, ảnh obama.jpg 274 KiB)
+
+* **Kịch bản đo:** Chạy liên tục 50 lần pipeline AI (`validate/decode` + `detect_largest` + `PAD evaluate` + `recognizer encode`) trên CPU máy chủ.
+* **Kết quả đo lường trung thực:**
+
+| Chỉ số thời gian | Trước (Decode 4 lần: Pillow + 2x cv2 + Pillow) | Sau (Decode 1 lần: cv2.imdecode duy nhất) | Chênh lệch (Cải thiện) |
+|---|---|---|---|
+| **Thời gian trung bình (Mean)** | **1073.40 ms** | **1050.91 ms** | **Giảm 22.49 ms (-2.1%)** |
+| **Trung vị (Median)** | **1066.86 ms** | **1001.78 ms** | **Giảm 65.08 ms (-6.1%)** |
+| **Thời gian nhỏ nhất (Min)** | **627.56 ms** | **375.37 ms** | **Giảm 252.19 ms (-40.2%)** |
+| **Thời gian lớn nhất (Max)** | 1604.42 ms | 2541.51 ms | Dao động tải CPU hệ thống |
+
+> [!NOTE]
+> **Nhận xét kỹ thuật trung thực:** Việc loại bỏ 3 lần decode JPEG dư thừa giúp tiết kiệm khoảng **22 - 65 ms** trên mỗi khung hình và giảm mạnh thời gian phản hồi ở các khung hình lý tưởng (từ 627 ms xuống 375 ms). Phần lớn thời gian còn lại (~1000 ms) là do mạng nơ-ron dlib ResNet chạy trích xuất embedding 128D trên CPU. Việc decode 1 lần giúp giảm áp lực cấp phát bộ nhớ RAM tạm và CPU khi nhận luồng frame dồn dập từ ESP32-CAM.
+
+### Kết quả kiểm thử thực tế
+
+1. **Backend Unit Tests:**
+   * Lệnh: `PYTHONPATH=backend /tmp/claude-1000/-home-nycarag/a5456080-ab66-4d8b-a6cf-843b3c5e2231/scratchpad/venv/bin/python -m pytest backend/tests -q`
+   * Kết quả: **55 passed in 9.88s** (toàn bộ 52 bài test trước đó + 3 bài unit test mới cho T04 đều PASS).

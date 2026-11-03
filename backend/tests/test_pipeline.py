@@ -176,6 +176,36 @@ class PipelineTests(unittest.TestCase):
         res_ambiguous = match(probe, [(ref_sv1, stu1), (ref_sv2, stu2)], threshold=0.50, margin=0.05)
         self.assertIsNone(res_ambiguous)
 
+    def test_prepare_face_accepts_ndarray(self):
+        frame = np.full((160, 160, 3), (10, 50, 200), dtype=np.uint8)
+        tensor = prepare_face(frame, (40, 40, 80, 80))
+        self.assertEqual(tensor.shape, (1, 3, 80, 80))
+        self.assertEqual(tensor.dtype, np.float32)
+        self.assertEqual(float(tensor[0, 0, 0, 0]), 10)
+        self.assertEqual(float(tensor[0, 2, 0, 0]), 200)
+
+    def test_detector_accepts_ndarray(self):
+        from app.services.face_detector import FaceDetector
+        detector = FaceDetector()
+        frame = np.zeros((160, 160, 3), dtype=np.uint8)
+        det, reason = detector.detect_largest(frame, (0.0, 0.0, 1.0, 1.0))
+        self.assertIsNone(det)
+        self.assertEqual(reason, "no face detected")
+
+    def test_decode_image_and_dimension_validation(self):
+        from app.services.images import decode_image, validate_frame
+        tiny = np.zeros((32, 32, 3), dtype=np.uint8)
+        with self.assertRaises(ValueError):
+            validate_frame(tiny)
+        _, tiny_png = cv2.imencode(".png", tiny)
+        with self.assertRaises(ValueError):
+            decode_image(tiny_png.tobytes())
+
+        valid = np.zeros((80, 80, 3), dtype=np.uint8)
+        _, valid_png = cv2.imencode(".png", valid)
+        decoded = decode_image(valid_png.tobytes())
+        self.assertEqual(decoded.shape, (80, 80, 3))
+
 
 if __name__ == "__main__":
     unittest.main()
