@@ -49,13 +49,11 @@ def validate_camera_url(url: str) -> str:
 
     # Try parsing directly as an IP address literal
     try:
-        ip = ipaddress.ip_address(hostname)
-        is_ip = True
+        ipaddress.ip_address(hostname)
     except ValueError:
-        is_ip = False
-
-    if is_ip:
-        if not (ip.is_private or ip.is_loopback):
+        pass
+    else:
+        if not is_private_or_loopback_ip(hostname):
             raise ValueError(f"Camera IP '{hostname}' is not a private LAN or loopback address (SSRF protection)")
         return url
 
