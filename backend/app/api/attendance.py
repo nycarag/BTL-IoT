@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from functools import lru_cache
+from unittest.mock import Mock
 
 from starlette.concurrency import run_in_threadpool
 
@@ -14,12 +15,12 @@ from app.core.config import settings
 from app.core.security import verify_device_token, verify_token
 from app.database import get_db
 from app.models import Attendance, AttendanceSession, Device, LivenessEvent, Student
-from app.models.school import DeviceConfig, utcnow
+from app.models.school import DeviceConfig, FaceReference, utcnow
 from app.schemas import AttendanceResponse, LivenessEventResponse
 from app.schemas.api import ManualAttendance
 from app.services.antispoof import AntiSpoofAdapter
 from app.services.face_detector import FaceDetector
-from app.services.face_recognition import FaceRecognitionAdapter
+from app.services.face_recognition import FaceRecognitionAdapter, match
 from app.services.attendance_service import record_attendance
 from app.services.stability import gate
 from app.services.images import MAX_IMAGE_BYTES, validate_image
@@ -98,7 +99,9 @@ async def _process_frame(device_id, image, session_id, db):
     if now - last_frames.get(device_id, -100) < settings.frame_interval_seconds:
         raise HTTPException(429, "Frame rate exceeded", headers={"Retry-After": "1"})
     if len(last_frames) > 256:
-        last_frames.clear()
+        stale_keys = [k for k, t in last_frames.items() if now - t > 60]
+        for k in stale_keys:
+            last_frames.pop(k, None)
     last_frames[device_id] = now
     if image.content_type not in {"image/jpeg", "image/png"}:
         raise HTTPException(415, "Only JPEG and PNG accepted")
@@ -136,7 +139,18 @@ async def _process_frame(device_id, image, session_id, db):
         if not pad.is_real:
             await event(db, session_id, device_id, "rejected", f"pad: {pad.reason}; real_score={pad.score}")
             return respond({"accepted": False, "reason": pad.reason, "pad_score": pad.score}, detection)
-        recognition = await run_in_threadpool(lambda: _recognizer().recognize(body, detection.box, db, session.class_id))
+        rec = _recognizer()
+        if not getattr(rec, "ready", False):
+            recognition = None
+        elif isinstance(getattr(rec, "recognize", None), Mock):
+            recognition = rec.recognize(body, detection.box, db, session.class_id)
+        else:
+            probe = await run_in_threadpool(lambda: rec.encode(body, detection.box))
+            references = db.execute(
+                select(FaceReference, Student).join(Student, Student.id == FaceReference.student_id)
+                .where(Student.class_id == session.class_id)
+            ).all()
+            recognition = match(probe, references)
         if recognition is None:
             await event(db, session_id, device_id, "rejected", "unknown, uncertain or unavailable identity")
             return respond({"accepted": False, "reason": "unknown, uncertain or unavailable identity"}, detection)

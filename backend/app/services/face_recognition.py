@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 import json
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 from sqlalchemy import select
@@ -16,6 +17,42 @@ from app.models.school import FaceReference, Student
 class RecognitionResult:
     student_code: str
     distance: float
+
+
+def match(
+    probe: np.ndarray,
+    references: list[Any],
+    threshold: float | None = None,
+    margin: float | None = None,
+) -> RecognitionResult | None:
+    if probe is None or not isinstance(probe, np.ndarray) or probe.shape != (128,) or not np.isfinite(probe).all():
+        return None
+    thresh = settings.recognition_threshold if threshold is None else threshold
+    marg = settings.recognition_margin if margin is None else margin
+    matches = []
+    for item in references:
+        if isinstance(item, (tuple, list)):
+            reference, student = item
+        else:
+            reference = item
+            student = getattr(item, "student", None)
+        try:
+            vector = np.asarray(json.loads(reference.embedding), dtype=np.float64)
+        except (ValueError, TypeError, AttributeError):
+            continue
+        if vector.shape != (128,) or not np.isfinite(vector).all():
+            continue
+        dist = float(np.linalg.norm(vector - probe))
+        if not np.isfinite(dist):
+            continue
+        student_code = getattr(student, "student_code", None) or getattr(reference, "student_code", "")
+        matches.append((dist, student_code))
+    matches.sort(key=lambda m: m[0])
+    if not matches or matches[0][0] > thresh:
+        return None
+    if len(matches) > 1 and matches[1][0] - matches[0][0] < marg:
+        return None
+    return RecognitionResult(matches[0][1], matches[0][0])
 
 
 class FaceRecognitionAdapter:
@@ -55,18 +92,8 @@ class FaceRecognitionAdapter:
         if not self.ready:
             return None
         probe = self.encode(image_bytes, box)
-        matches = []
-        for reference, student in db.execute(
+        references = db.execute(
             select(FaceReference, Student).join(Student, Student.id == FaceReference.student_id)
             .where(Student.class_id == class_id)
-        ):
-            vector = np.asarray(json.loads(reference.embedding), dtype=np.float64)
-            if vector.shape != (128,) or not np.isfinite(vector).all():
-                continue
-            matches.append((float(np.linalg.norm(vector - probe)), student.student_code))
-        matches.sort()
-        if not matches or matches[0][0] > settings.recognition_threshold:
-            return None
-        if len(matches) > 1 and matches[1][0] - matches[0][0] < settings.recognition_margin:
-            return None
-        return RecognitionResult(matches[0][1], matches[0][0])
+        ).all()
+        return match(probe, references)
