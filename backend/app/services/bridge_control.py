@@ -15,7 +15,7 @@ import threading
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from app.core.config import ROOT_DIR, settings
+from app.core.config import settings
 from app.services.camera_preview import previews
 
 logger = logging.getLogger("bridge-control")
@@ -47,15 +47,17 @@ def validate_camera_url(url: str) -> str:
     if hostname.lower() == "localhost":
         return url
 
-    # Try validating directly as an IP address literal
+    # Try parsing directly as an IP address literal
     try:
         ip = ipaddress.ip_address(hostname)
+        is_ip = True
+    except ValueError:
+        is_ip = False
+
+    if is_ip:
         if not (ip.is_private or ip.is_loopback):
             raise ValueError(f"Camera IP '{hostname}' is not a private LAN or loopback address (SSRF protection)")
         return url
-    except ValueError as exc:
-        if "is not a private LAN" in str(exc):
-            raise
 
     # For domain hostnames: resolve and ensure all resolved IP addresses are private/loopback
     try:
@@ -93,16 +95,10 @@ class BridgeControl:
         return os.getenv("CAMERA_DEVICE_ID", "esp32-cam-01")
 
     def _resolve_script(self) -> Path:
-        candidates = [
-            ROOT_DIR / "backend" / "camera_bridge.py",
-            ROOT_DIR / "camera_bridge.py",
-            Path(__file__).resolve().parents[2] / "camera_bridge.py",
-            Path("/opt/camera_bridge.py"),
-        ]
-        for candidate in candidates:
-            if candidate.is_file():
-                return candidate
-        raise FileNotFoundError("Cannot locate backend/camera_bridge.py script")
+        script = Path(__file__).resolve().parents[2] / "camera_bridge.py"
+        if not script.is_file():
+            raise FileNotFoundError(f"Cannot locate camera_bridge.py script at {script}")
+        return script
 
     def status(self) -> dict:
         with self.lock:
@@ -141,7 +137,7 @@ class BridgeControl:
             if source == "webcam":
                 self._camera_url = None
             else:
-                target_url = camera_url or getattr(settings, "default_camera_url", "http://192.168.4.1/capture")
+                target_url = camera_url or settings.default_camera_url
                 validated_url = validate_camera_url(target_url)
                 self._camera_url = validated_url
 
@@ -161,7 +157,7 @@ class BridgeControl:
             # Pass token strictly via environment variable to avoid exposure in ps/process lists
             env = dict(os.environ)
             env["DEVICE_TOKEN"] = settings.device_token
-            env["BRIDGE_BACKEND_URL"] = f"http://127.0.0.1:{getattr(settings, 'backend_port', 8000)}"
+            env["BRIDGE_BACKEND_URL"] = f"http://127.0.0.1:{settings.backend_port}"
             env["CAMERA_DEVICE_ID"] = self.device_id
             if source == "esp32" and self._camera_url:
                 env["CAMERA_CAPTURE_URL"] = self._camera_url

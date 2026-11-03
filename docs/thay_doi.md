@@ -546,6 +546,29 @@ Module điều khiển và kiểm thử được port có chọn lọc từ repo
 - Backend Tests: `PYTHONPATH=backend pytest backend/tests -q` $\rightarrow$ **96 passed, 3 warnings in 13.31s** (tăng thêm 14 test case mới, 100% test suite vượt qua).
 - Frontend Build: `npm run build` $\rightarrow$ **Thành công 100% (0 lỗi TypeScript)**.
 
+## [2026-11-03] REWORK T11: Tối ưu hóa điều khiển vòng đời và chuẩn hóa kiểm thực Camera Bridge
+
+### Bối cảnh & Lý do chỉnh sửa
+1. Không lạm dụng tính năng gộp lifespan của `APIRouter` (phụ thuộc phiên bản FastAPI nội bộ). Đưa `bridge.stop()` vào khối `finally:` của lifespan chính trong `backend/app/main.py`.
+2. Gỡ bỏ các endpoint alias `/camera-bridge/*` không có trong đặc tả, tránh dư thừa code.
+3. Thu gọn `_resolve_script` chỉ giữ 1 đường dẫn chuẩn `backend/camera_bridge.py`. Truy cập trực tiếp cấu hình `settings.default_camera_url` và `settings.backend_port` thay vì dùng `getattr`.
+4. Chuẩn hóa hàm `validate_camera_url`: khối `try/except` chỉ bao quanh hàm phân tích `ipaddress.ip_address`, sau đó kiểm tra điều kiện ngoài khối try, dùng lại hàm thuần `is_private_or_loopback_ip` cho cả IP và hostname domain, loại bỏ bắt lỗi bằng chuỗi thông điệp ngoại lệ.
+5. Kiểm thực Pydantic kiểu dữ liệu chặt chẽ bằng `Literal["webcam", "esp32"]`.
+
+### Các thay đổi chi tiết
+
+| Tệp thay đổi | Loại thao tác | Mô tả chi tiết | Mục đích / Tác động |
+|---|---|---|---|
+| `backend/app/main.py` | Chỉnh sửa | Đặt lệnh `bridge.stop()` vào khối `finally:` của context manager `lifespan`. | Đảm bảo bridge luôn được dừng tin cậy khi server tắt, không phụ thuộc phiên bản framework. |
+| `backend/app/api/devices.py` | Chỉnh sửa | 1. Xóa `devices_lifespan`, trả lại `router = APIRouter()`.<br>2. Xóa bỏ 3 endpoint alias `/camera-bridge/*`.<br>3. Khai báo `BridgeStartRequest.source: Literal["webcam", "esp32"]`. | Tinh gọn mã nguồn và tự động kiểm thực giá trị nguồn camera bằng Pydantic (trả về 422 khi sai giá trị). |
+| `backend/app/services/bridge_control.py` | Chỉnh sửa | 1. Thu gọn `_resolve_script` dùng đường dẫn duy nhất `parents[2] / "camera_bridge.py"`.<br>2. Sử dụng trực tiếp `settings.default_camera_url` và `settings.backend_port`.<br>3. Viết lại `validate_camera_url` tách biệt logic parse IP và kiểm tra private/loopback, tái sử dụng hàm `is_private_or_loopback_ip`. | Tối giản, tường minh và loại bỏ code phỏng đoán/dự phòng thừa. |
+| `backend/tests/test_bridge_control.py` | Chỉnh sửa | 1. Bổ sung test case `test_lifespan_shuts_down_bridge` sử dụng context manager `TestClient(app)`.<br>2. Bổ sung test case `test_start_rejects_invalid_source_literal` kiểm tra Pydantic validate Literal (422). | Nâng tổng số bài test kiểm thử bridge control lên 15 bài, kiểm chứng trọn vẹn vòng đời và schema. |
+| `docs/thay_doi.md` | Chỉnh sửa | Ghi nhận chi tiết thay đổi REWORK T11. | Nhật ký phát triển hệ thống. |
+
+### Kết quả kiểm thử thực tế
+- Backend Tests: `PYTHONPATH=backend pytest backend/tests -q` $\rightarrow$ **97 passed, 3 warnings in 13.88s** (100% test suite vượt qua).
+- Frontend Build: `npm run build` $\rightarrow$ **Thành công 100% (0 lỗi TypeScript)**.
+
 
 
 

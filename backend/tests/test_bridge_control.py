@@ -197,8 +197,12 @@ class BridgeApiIntegrationTests(unittest.TestCase):
             self.assertEqual(res.status_code, 400)
             self.assertIn("already running", res.json()["detail"])
 
+    def test_start_rejects_invalid_source_literal(self):
+        res = self.client.post("/api/bridge/start", headers=self.auth, json={"source": "invalid_source"})
+        self.assertEqual(res.status_code, 422)
+
     def test_lifespan_shuts_down_bridge(self):
-        with patch("app.api.devices.bridge.stop") as mock_stop:
+        with patch("app.main.bridge.stop") as mock_stop:
             with TestClient(self.client.app):
                 pass
-            mock_stop.assert_called()
+            mock_stop.assert_called_once()

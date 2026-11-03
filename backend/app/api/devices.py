@@ -1,7 +1,7 @@
 import asyncio
-from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import logging
+from typing import Literal
 
 import time
 from starlette.concurrency import run_in_threadpool
@@ -25,20 +25,11 @@ from app.schemas import DeviceHeartbeat, DeviceResponse
 from app.schemas.api import DeviceConfigInput
 from app.services.stability import gate
 
-
-@asynccontextmanager
-async def devices_lifespan(app):
-    try:
-        yield
-    finally:
-        bridge.stop()
-
-
-router = APIRouter(lifespan=devices_lifespan)
+router = APIRouter()
 
 
 class BridgeStartRequest(BaseModel):
-    source: str = Field(default="webcam", description="Camera source type: webcam or esp32")
+    source: Literal["webcam", "esp32"] = Field(default="webcam", description="Camera source type: webcam or esp32")
     camera_url: str | None = Field(default=None, description="Optional ESP32 snapshot URL")
 
 
@@ -236,19 +227,4 @@ def start_bridge(payload: BridgeStartRequest = BridgeStartRequest(), _: str = De
 
 @router.post("/bridge/stop")
 def stop_bridge(_: str = Depends(verify_token)):
-    return bridge.stop()
-
-
-@router.get("/camera-bridge/status", include_in_schema=False)
-def get_camera_bridge_status(_: str = Depends(verify_token)):
-    return bridge.status()
-
-
-@router.post("/camera-bridge/start", include_in_schema=False)
-def start_camera_bridge(payload: BridgeStartRequest = BridgeStartRequest(), _: str = Depends(verify_token)):
-    return start_bridge(payload, _)
-
-
-@router.post("/camera-bridge/stop", include_in_schema=False)
-def stop_camera_bridge(_: str = Depends(verify_token)):
     return bridge.stop()
