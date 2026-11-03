@@ -44,7 +44,3 @@ ESP32-CAM / Webcam ──(MJPEG/JPEG)──> Camera Bridge ──(HTTP POST)─�
   Trả lời: Cổng yêu cầu khuôn mặt giữ vị trí tương đồng (IoU >= 0.6) qua 3 frame liên tiếp để tránh điểm danh người đi lướt qua ngoài ý muốn và loại bỏ frame rung lắc.
 - Câu 4: Khi có nhiều người cùng lọt vào khung hình thì hệ thống xử lý ra sao?
   Trả lời: Bộ dò kiểm tra vùng ROI cấu hình sẵn; nếu phát hiện từ hai khuôn mặt trở lên trong ROI, hệ thống từ chối xử lý và yêu cầu chỉ một người vào khung hình.
-
-## 5. Giới hạn hệ thống
-
-Xem chi tiết tại mục [Phạm vi chống gian lận và kiểm chứng](../README.md#phạm-vi-chống-gian-lận-và-kiểm-chứng).
