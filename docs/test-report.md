@@ -1,8 +1,8 @@
-# Kết quả kiểm thử phần mềm — 2026-10-29
+# Kết quả kiểm thử phần mềm
 
 ## Đã thực hiện
 
-- `python -m unittest discover -s tests -v`: **41 tests PASS** trong môi trường Python kiểm thử Linux ngoài Docker.
+- Ngày 2026-11-04: `PYTHONPATH=backend pytest backend/tests -q`: **97 passed, 3 warnings** trong môi trường Python kiểm thử Linux ngoài Docker.
 - `python -m compileall`: mã Python app/tests/seed/evaluate_pad/camera_bridge qua kiểm tra cú pháp.
 - Frontend `tsc -b && vite build`: PASS trong bản sao kiểm thử trên filesystem Linux (dependency trên /mnt/d từng bị hỏng).
 - `docker compose --profile camera-ap config --quiet`: PASS; chỉ kiểm tra cấu hình, **không build/chạy container** theo yêu cầu người dùng.

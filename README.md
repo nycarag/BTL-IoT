@@ -34,7 +34,7 @@ Chi tiết các luồng xử lý và giao thức truyền tải xem tại [docs/
 
 ## Cài đặt và khởi chạy
 
-1. Cài đặt môi trường Python (lưu ý: `requirements.txt` ở thư mục gốc là của bản Streamlit cũ):
+1. Cài đặt môi trường Python:
    ```bash
    pip install -r backend/requirements.txt -r backend/requirements-recognition.txt
    ```
@@ -90,5 +90,5 @@ Kết quả đo được: 97 passed, 3 warnings (cảnh báo DeprecationWarning 
 - [docs/docker.md](docs/docker.md): Hướng dẫn đóng gói và triển khai hệ thống bằng Docker Compose.
 - [docs/model-evaluation.md](docs/model-evaluation.md): Quy trình hiệu chuẩn và đánh giá mô hình nhận diện, PAD.
 - [docs/test-report.md](docs/test-report.md): Báo cáo kiểm thử tự động và kịch bản đầu-cuối.
-- [BAO_CAO_THUYET_TRINH.md](BAO_CAO_THUYET_TRINH.md): Tóm tắt nội dung báo cáo phục vụ thuyết trình.
+- [docs/thuyet-trinh.md](docs/thuyet-trinh.md): Tóm tắt kỹ thuật và kịch bản demo khi thuyết trình.
 - [docs/BaoCao_BTL_IoT_Nhom05.pdf](docs/BaoCao_BTL_IoT_Nhom05.pdf): Báo cáo tổng kết bài tập lớn của nhóm.
