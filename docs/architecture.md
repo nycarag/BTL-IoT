@@ -13,6 +13,7 @@ Laptop / FastAPI (một process)
   ├─ giới hạn 5 MiB, JPEG/PNG, 4 MP trước khi decode
   ├─ YuNet face detector (ONNX, score ≥ 0.8) kèm Haar fallback + một mặt trong ROI + size/sharpness + clamp bbox
   ├─ geometric stability IoU qua N frame liên tiếp theo device/session
+  ├─ active liveness EAR (Eye Aspect Ratio, dlib 68 landmarks) trên preview stream (~10 Hz)
   ├─ MiniFASNetV2 ONNX / CPU → real softmax index 1
   ├─ dlib embedding 128D → Euclidean distance + ambiguity margin
   ├─ SQLite transaction: recheck phiên/lớp/assignment/enrollment
@@ -37,7 +38,7 @@ Giảng viên dùng bearer HMAC có hạn 8 giờ; secret là ADMIN_PASSWORD, th
 
 Đăng ký khuôn mặt là thao tác giảng viên có consent; cần kiểm tra trực tiếp đúng người. Đúng một mặt và embedding hữu hạn; lưu embedding, không lưu bytes ảnh. Có endpoint thu hồi embedding mà không xóa lịch sử. Không nạp ảnh theo filename từ `data/faces` nữa.
 
-Pipeline dùng cùng bbox đã qua ROI cho PAD và recognition, không tự phát hiện lại một người khác. PAD chỉ được chấp nhận khi model nạp, output đúng 1×3/hữu hạn, class thật đạt threshold và calibrated. Recognition cần dependency, calibrated và embedding trong lớp; best match vượt threshold hoặc gần second-best bị từ chối.
+Pipeline dùng cùng bbox đã qua ROI cho PAD và recognition, không tự phát hiện lại một người khác. Active liveness (phát hiện chớp mắt qua EAR bằng dlib 68 landmarks) xử lý bất đồng bộ không chặn luồng preview (tối đa 10 Hz) với adaptive baseline trung vị. Khi cổng AI nhận diện, backend kiểm tra đã có chớp mắt hợp lệ trong cửa sổ thời gian gần nhất (mặc định 5s) và cùng vị trí khuôn mặt; sau khi ghi nhận điểm danh thành công thì chớp mắt được tiêu thụ (consume) để chống replay. PAD chỉ được chấp nhận khi model nạp, output đúng 1×3/hữu hạn, class thật đạt threshold và calibrated. Recognition cần dependency, calibrated và embedding trong lớp; best match vượt threshold hoặc gần second-best bị từ chối.
 
 Stability chỉ là liên tục hình học theo IoU và khoảng cách thời gian, không chứng minh cùng danh tính hoặc hướng đi. Một người ngoài ROI không được chọn; nhiều người trong ROI bị reject. Thay camera/độ phân giải/góc lắp phải hiệu chỉnh lại.
 

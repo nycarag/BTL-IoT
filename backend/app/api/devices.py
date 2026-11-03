@@ -1,4 +1,6 @@
+import asyncio
 from datetime import datetime, timezone
+import logging
 
 import time
 from starlette.concurrency import run_in_threadpool
@@ -110,6 +112,31 @@ def set_config(device_id: str, payload: DeviceConfigInput, _: str = Depends(veri
 
 preview_uploads = {}
 _known_devices: set[str] = set()
+_last_liveness_times: dict[str, float] = {}
+_liveness_busy: set[str] = set()
+logger = logging.getLogger(__name__)
+
+
+def _has_active_session(device_id: str, db: Session) -> bool:
+    config = db.get(DeviceConfig, device_id)
+    if not config or not config.session_id:
+        return False
+    session = db.get(AttendanceSession, config.session_id)
+    return session is not None and session.status == "open"
+
+
+async def _run_liveness_frame(device_id: str, body: bytes, timestamp: float) -> None:
+    try:
+        from app.services.images import decode_image
+        from app.services.liveness import tracker
+        if not tracker.is_available():
+            return
+        frame = await run_in_threadpool(decode_image, body)
+        await run_in_threadpool(tracker.process_frame, device_id, frame, timestamp)
+    except Exception:
+        logger.exception("Failed to process liveness for device %s", device_id)
+    finally:
+        _liveness_busy.discard(device_id)
 
 
 @router.post("/devices/{device_id}/preview", status_code=202)
@@ -138,6 +165,13 @@ async def upload_preview(device_id: str, image: UploadFile,
     if not (body.startswith(b"\xff\xd8") or body.startswith(b"\x89PNG")):
         raise HTTPException(422, "Only JPEG and PNG accepted")
     previews.put(device_id, body, is_preview=True)
+    if settings.liveness_mode == "blink":
+        liveness_gap = 1.0 / max(settings.liveness_max_hz, 1.0)
+        if now - _last_liveness_times.get(device_id, -100.0) >= liveness_gap and device_id not in _liveness_busy:
+            if _has_active_session(device_id, db):
+                _last_liveness_times[device_id] = now
+                _liveness_busy.add(device_id)
+                asyncio.create_task(_run_liveness_frame(device_id, body, now))
     # Heartbeat updates database separately; no SQLite write per preview frame.
     return {"preview": True, "accepted": False, "reason": "Preview only; no attendance processed"}
 

@@ -106,11 +106,16 @@ class ApiTests(unittest.TestCase):
 
     def test_pipeline_stability_pad_identity_and_duplicate(self):
         detection = FaceDetection((40, 40, 80, 80), (80, 80), 6400, (160, 160), True, 1)
-        with patch("app.api.attendance._detector") as detector, patch("app.api.attendance._pad") as pad, patch("app.api.attendance._recognizer") as recognizer:
+        with patch("app.api.attendance._detector") as detector, \
+             patch("app.api.attendance._pad") as pad, \
+             patch("app.api.attendance._recognizer") as recognizer, \
+             patch("app.api.attendance._liveness") as liveness:
             detector.return_value.detect_largest.return_value = (detection, "ok")
             pad.return_value.evaluate.return_value = PadResult(True, "passed", .99)
             recognizer.return_value.ready = True
             recognizer.return_value.encode.return_value = np.zeros(128, dtype=np.float64)
+            liveness.return_value.is_available.return_value = True
+            liveness.return_value.has_recent_blink.return_value = True
             self.assertFalse(self.frame().json()["accepted"])
             self.assertFalse(self.frame().json()["accepted"])
             self.assertTrue(self.frame().json()["created"])

@@ -48,6 +48,12 @@ def _recognizer():
     return FaceRecognitionAdapter()
 
 
+@lru_cache(maxsize=1)
+def _liveness():
+    from app.services.liveness import tracker
+    return tracker
+
+
 def _attendance_response(item):
     return dict(id=item.id, session_id=item.session_id, student_id=item.student_id,
                 student_code=item.student.student_code, student_name=item.student.name,
@@ -138,6 +144,19 @@ async def _process_frame(device_id, image, session_id, db):
         if not pad.is_real:
             await event(db, session_id, device_id, "rejected", f"pad: {pad.reason}; real_score={pad.score}")
             return respond({"accepted": False, "reason": pad.reason, "pad_score": pad.score}, detection)
+        if settings.liveness_mode == "blink":
+            trk = _liveness()
+            if not trk.is_available():
+                await event(db, session_id, device_id, "rejected", "liveness unavailable")
+                return respond({"accepted": False, "reason": "liveness unavailable"}, detection)
+            if not trk.has_recent_blink(
+                device_id,
+                within=settings.liveness_window_s,
+                near_center=detection.center,
+                frame_width=detection.frame_size[0],
+            ):
+                await event(db, session_id, device_id, "rejected", "liveness: blink required")
+                return respond({"accepted": False, "reason": "liveness: blink required"}, detection)
         rec = _recognizer()
         if not getattr(rec, "ready", False):
             recognition = None
@@ -154,6 +173,8 @@ async def _process_frame(device_id, image, session_id, db):
         student = db.scalar(select(Student).where(Student.student_code == recognition.student_code))
         row, created = record_attendance(db, session, student, device_id=device_id,
                                          verification=f"face+pad:{pad.score:.4f};distance:{recognition.distance:.4f}")
+        if settings.liveness_mode == "blink":
+            _liveness().consume_blink(device_id)
     except Exception:
         logger.exception("Attendance pipeline failed")
         db.rollback()

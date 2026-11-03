@@ -61,6 +61,10 @@ class Settings:
     pad_model_path: str = os.getenv("PAD_MODEL_PATH", DEFAULT_PAD_MODEL if os.path.exists(DEFAULT_PAD_MODEL) else "")
     pad_real_threshold: float = float(os.getenv("PAD_REAL_THRESHOLD", "0.45"))
     pad_crop_scale: float = float(os.getenv("PAD_CROP_SCALE", "2.7"))
+    liveness_mode: str = os.getenv("LIVENESS_MODE", "blink").lower().strip()
+    liveness_closed_ratio: float = float(os.getenv("LIVENESS_CLOSED_RATIO", "0.75"))
+    liveness_window_s: float = float(os.getenv("LIVENESS_WINDOW_S", "5.0"))
+    liveness_max_hz: float = float(os.getenv("LIVENESS_MAX_HZ", "10.0"))
     recognition_calibrated: bool = os.getenv("RECOGNITION_CALIBRATED", "true").lower() == "true"
     pad_calibrated: bool = os.getenv("PAD_CALIBRATED", "true").lower() == "true"
     cors_origins: tuple[str, ...] = tuple(

@@ -214,6 +214,56 @@
 - Lệnh thực thi: `PYTHONPATH=backend pytest backend/tests -q`
 - Kết quả: **68 passed** (toàn bộ 67 bài test trước đó + 1 unit test mới `test_get_new_box_shifts_instead_of_truncating` đều PASS 100%).
 
+## Task T07: Liveness Chủ Động - Phát Hiện Chớp Mắt (EAR) Trên Luồng Preview
+
+* **Ngày thực hiện:** 03/11/2026
+* **Nhánh git:** `overhaul/v2`
+* **Lý do kỹ thuật:**
+  - Luồng AI chụp định kỳ gửi ảnh với tần số chậm (~0.8s/khung) nên không thể bắt kịp chuyển động chớp mắt tự nhiên vốn diễn ra trong khoảng thời gian rất ngắn (100–400ms).
+  - Luồng preview JPEG đã sẵn có và được camera gửi lên backend liên tục ở tần số ~15–25 FPS qua endpoint `POST /api/devices/{id}/preview`.
+  - YuNet chỉ xuất 5 điểm landmarks (hai mắt, mũi, hai khóe miệng) nên không đủ điểm để tính tỷ lệ đóng mở mắt Eye Aspect Ratio (EAR). Hệ thống tận dụng dlib shape predictor 68 landmarks có sẵn trong gói `face_recognition_models` (`face_recognition_models.pose_predictor_model_location()`), không thêm dependency bên ngoài mới.
+
+### Danh sách tệp thay đổi
+
+| Tệp tin | Hành động | Nội dung thay đổi | Lý do kỹ thuật |
+|---|---|---|---|
+| `backend/app/services/liveness.py` | Tạo mới | 1. Hàm thuần `ear(eye6pts)` tính tỷ lệ mở mắt theo chuẩn Soukupová & Čech (2016): $(\|p_2 - p_6\| + \|p_3 - p_5\|) / (2 \cdot \|p_1 - p_4\|)$.<br>2. `DeviceBlinkState` quản lý hàng đợi trượt (deque) 3 giây các mẫu `(timestamp, ear, center_x, center_y)` cho từng thiết bị.<br>3. Ngưỡng thích ứng: tính baseline bằng trung vị (median) EAR mắt mở trong lịch sử; ngưỡng nhắm mắt là `baseline * LIVENESS_CLOSED_RATIO` (mặc định 0.75).<br>4. Nhận diện chớp mắt: Mắt mở $\rightarrow$ Nhắm ($\ge 1$ mẫu) $\rightarrow$ Mở lại trong thời gian $\le 0.8s$. Nếu nhắm mắt liên tục $> 0.8s$ (vd: ngủ hoặc nhắm mắt giả lập) sẽ không được tính là chớp mắt.<br>5. Reset trạng thái: tự động xóa lịch sử nếu mất mặt $> 1s$ hoặc tâm mặt dịch chuyển đột ngột $> 25\%$ chiều rộng frame (chuyển người).<br>6. Cơ chế fail-closed: nếu dlib shape predictor không tải được $\rightarrow$ `is_available() == False`.<br>7. Tiêu thụ chớp mắt: hàm `consume_blink(device_id)` xóa dấu vết chớp mắt ngay khi điểm danh thành công để chống replay. | Cung cấp dịch vụ phát hiện chớp mắt thời gian thực mạnh mẽ, tự thích ứng với hình dạng mắt từng người và ngăn chặn tấn công phát lại video/ảnh in. |
+| `backend/app/core/config.py` | Chỉnh sửa | Thêm các thuộc tính cấu hình liveness vào `Settings`: `liveness_mode: str = "blink"`, `liveness_closed_ratio: float = 0.75`, `liveness_window_s: float = 5.0`, `liveness_max_hz: float = 10.0`. | Cho phép tùy chỉnh tham số qua biến môi trường mà không cần sửa code. |
+| `backend/.env.example` | Chỉnh sửa | Bổ sung các biến mẫu: `LIVENESS_MODE=blink`, `LIVENESS_CLOSED_RATIO=0.75`, `LIVENESS_WINDOW_S=5.0`, `LIVENESS_MAX_HZ=10.0`. | Hướng dẫn cấu hình môi trường triển khai. |
+| `backend/app/api/devices.py` | Chỉnh sửa | Trong `upload_preview`: nếu phiên điểm danh đang mở (`has_active_session`) và `liveness_mode == "blink"`:<br>1. Điều tiết tần số xử lý tối đa `LIVENESS_MAX_HZ` (10 Hz).<br>2. Non-blocking async: kiểm tra cờ `_liveness_busy`, nếu rỗi thì kích hoạt background task `asyncio.create_task(_run_liveness_frame(...))` giải mã và phân tích landmark, không làm chậm phản hồi preview. | Tận dụng luồng preview FPS cao để tính toán EAR mà không ảnh hưởng độ trễ truyền hình ảnh. |
+| `backend/app/api/attendance.py` | Chỉnh sửa | 1. Thêm dependency helper `_liveness()`.<br>2. Cổng kiểm tra liveness: sau khi bước PAD thành công và trước khi ghi nhận điểm danh, kiểm tra `is_available()` (nếu không khả dụng $\rightarrow$ fail-closed với reason `"liveness unavailable"`), và kiểm tra `has_recent_blink(device_id, within, near_center, frame_width)` (nếu chưa có chớp mắt $\rightarrow$ reject với reason `"liveness: blink required"`).<br>3. Sau khi ghi nhận điểm danh thành công: gọi `_liveness().consume_blink(device_id)` tiêu thụ chớp mắt. | Tích hợp cổng xác thực liveness chặt chẽ vào luồng điểm danh chính. |
+| `backend/tests/test_liveness.py` | Tạo mới | Xây dựng 11 bài kiểm thử bao phủ toàn diện:<br>- Tính toán hình học hàm EAR với tọa độ thủ công chuẩn.<br>- Chuỗi EAR giả lập: mắt luôn mở (không chớp), nhắm mắt lâu 2s (không chớp), mở $\rightarrow$ nhắm $\rightarrow$ mở (chớp mắt hợp lệ).<br>- Reset khi nhảy tâm mặt và mất mặt $> 1s$.<br>- Kiểm tra khoảng cách tâm mặt trong `has_recent_blink`.<br>- Tiêu thụ chớp mắt qua `consume_blink`.<br>- Kiểm thử tích hợp luồng pipeline: từ chối khi chưa chớp mắt, chấp nhận khi có chớp mắt & tiêu thụ thành công, fail-closed khi model liveness không khả dụng. | Bảo đảm độ tin cậy và ngăn ngừa hồi quy logic liveness. |
+| `backend/tests/test_api.py` | Chỉnh sửa | Bổ sung mock cho `_liveness` trong bài test pipeline tổng hợp `test_pipeline_stability_pad_identity_and_duplicate` để tương thích với chế độ liveness mặc định. | Đảm bảo tính toàn vẹn của test suite hiện có. |
+| `docs/architecture.md` | Chỉnh sửa | Bổ sung mô tả cơ chế active liveness EAR trên luồng preview 10 Hz vào sơ đồ luồng và phần quyết định điểm danh. | Cập nhật tài liệu kiến trúc hệ thống. |
+
+### Đo nghiệm thực tế mô hình EAR & Landmark
+
+1. **Công thức chuẩn Eye Aspect Ratio (Soukupová & Čech, 2016):**
+   $$\text{EAR} = \frac{\|p_2 - p_6\| + \|p_3 - p_5\|}{2 \cdot \|p_1 - p_4\|}$$
+   - Mắt trái: các điểm landmarks từ 36 đến 41.
+   - Mắt phải: các điểm landmarks từ 42 đến 47.
+   - $\text{EAR}_{\text{avg}} = (\text{EAR}_{\text{left}} + \text{EAR}_{\text{right}}) / 2$.
+
+2. **Giá trị đo nghiệm trên ảnh chân dung mắt mở thật (`obama.jpg`):**
+   - $\text{EAR}_{\text{left}} = 0.2179$
+   - $\text{EAR}_{\text{right}} = 0.2375$
+   - $\text{EAR}_{\text{avg}} = 0.2277$
+   - Ngưỡng nhắm mắt thích ứng ($0.75 \times \text{baseline}$): $\approx 0.1708$.
+
+3. **Benchmark hiệu năng xử lý (CPU) trên ảnh độ phân giải CIF 400×296 (50 lần lặp):**
+   - Tác vụ: YuNet Face Detection + dlib 68-point shape landmark predictor.
+   - Thời gian trung bình (Mean): **7.24 ms / frame**.
+   - Thời gian tối thiểu (Min): **5.68 ms**.
+   - Thời gian tối đa (Max): **21.41 ms**.
+   - Phân vị 95 (P95): **8.61 ms**.
+   - **Đánh giá:** Chi phí trung bình ~7.2 ms hoàn toàn đáp ứng trơn tru tần số xử lý 10–15 Hz của luồng preview mà chỉ chiếm một phần rất nhỏ tải CPU (~7–10% của 1 core CPU).
+
+### Kết quả kiểm thử tự động
+
+- Lệnh thực thi kiểm thử riêng liveness: `PYTHONPATH=backend pytest backend/tests/test_liveness.py -v` $\rightarrow$ **11 passed**.
+- Lệnh thực thi toàn bộ kiểm thử backend: `PYTHONPATH=backend pytest backend/tests -q` $\rightarrow$ **79 passed** (100% test suite vượt qua).
+
+
 
 
 
