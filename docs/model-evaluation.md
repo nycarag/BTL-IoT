@@ -70,3 +70,38 @@ RECOGNITION_CALIBRATED=true
 ```
 
 Docker: `docker compose up -d` để recreate/nạp env mới. Chỉ `restart` không đổi environment. Native: khởi động lại backend. Cờ calibrated là xác nhận của người triển khai, không phải chứng nhận độ chính xác. Chưa có dữ liệu thực thì giữ false và dùng xác minh thủ công.
+
+## Đánh giá thực nghiệm nhận diện trên ảnh thật (Kiểm tra mẫu nhỏ, không phải benchmark)
+
+> [!NOTE]
+> Đây là phép đo kiểm chứng kỹ thuật trên một số ảnh mẫu công khai (tập ảnh ví dụ từ `ageitgey/face_recognition`: `obama.jpg`, `obama2.jpg`, `biden.jpg`), nhằm xác nhận tính nhất quán của không gian vector thô và kiểm tra cơ chế so khớp đa mẫu tham chiếu. Đây **không phải** là benchmark hoàn chỉnh (chưa đo FAR/FRR trên tập dữ liệu quy mô lớn).
+
+### 1. Dữ liệu thử nghiệm
+- Ảnh khuôn mặt 1 (Obama 1): `obama.jpg` (ảnh chân dung chụp thẳng).
+- Ảnh khuôn mặt 2 (Obama 2): `obama2.jpg` (ảnh khuôn mặt cùng người nhưng góc chụp và biểu cảm khác).
+- Ảnh khuôn mặt 3 (Biden): `biden.jpg` (ảnh người khác).
+
+### 2. Số liệu đo lường vector thô (dlib 128D)
+- Norm thô của `obama.jpg`: **1.3872**
+- Norm thô của `obama2.jpg`: **1.3638**
+- Norm thô của `biden.jpg`: **1.3899**
+*(Xác nhận: Vector thô của dlib ResNet không có chuẩn L2 = 1.0; việc chia L2-norm trước đây là sai lệch thang đo chuẩn dlib).*
+
+### 3. Ma trận khoảng cách Euclid (Euclidean Distance)
+
+| Cặp ảnh so sánh | Mối quan hệ | Khoảng cách Euclid thực tế | Ngưỡng chuẩn dlib (< 0.60) | Đánh giá |
+|---|---|---|---|---|
+| `obama.jpg` $\leftrightarrow$ `obama2.jpg` | Cùng một người (Genuine) | **0.3457** | Đạt (< 0.60) | Nhận diện đúng người |
+| `obama.jpg` $\leftrightarrow$ `biden.jpg` | Khác người (Impostor) | **0.8402** | Bị từ chối (> 0.60) | Từ chối chính xác mạo danh |
+| `obama2.jpg` $\leftrightarrow$ `biden.jpg` | Khác người (Impostor) | **0.8158** | Bị từ chối (> 0.60) | Từ chối chính xác mạo danh |
+
+### 4. Kết quả kiểm tra luồng khớp đa mẫu tham chiếu
+- **Kịch bản 1 (Chỉ enroll Obama):**
+  - Probe `obama2.jpg`: Khớp thành công `SV_OBAMA` với khoảng cách **0.3457** (khoảng cách nhỏ hơn ngưỡng 0.60).
+  - Probe `biden.jpg`: Trả về `None` (bị loại do khoảng cách 0.8402 vượt ngưỡng 0.60).
+- **Kịch bản 2 (Enroll cả Obama và Biden):**
+  - Probe `obama2.jpg`: Khớp thành công `SV_OBAMA` (khoảng cách 0.3457; sinh viên gần thứ nhì là Biden cách 0.8158, chênh lệch biên độ $0.8158 - 0.3457 = 0.4701 \ge 0.05$).
+  - Probe `biden.jpg`: Khớp thành công `SV_BIDEN`.
+- **Kịch bản 3 (Đa mẫu tham chiếu cho cùng một sinh viên):**
+  - Sinh viên được đăng ký 2 ảnh (`obama.jpg` và `obama2.jpg`).
+  - Khi probe gửi `obama2.jpg`: Hệ thống tự động chọn khoảng cách nhỏ nhất giữa probe và tập mẫu của sinh viên (**0.0000**), không bị vi phạm margin nội bộ giữa các mẫu của cùng một người.

@@ -3,12 +3,17 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 from dataclasses import dataclass
 
 import numpy as np
 
 from app.core.config import settings
 from app.models.school import FaceReference, Student
+
+logger = logging.getLogger(__name__)
+
+_warned_l2_legacy = False
 
 
 @dataclass(frozen=True)
@@ -23,22 +28,46 @@ def match(
     threshold: float | None = None,
     margin: float | None = None,
 ) -> RecognitionResult | None:
+    global _warned_l2_legacy
     if probe is None or not isinstance(probe, np.ndarray) or probe.shape != (128,) or not np.isfinite(probe).all():
         return None
     thresh = settings.recognition_threshold if threshold is None else threshold
     marg = settings.recognition_margin if margin is None else margin
-    matches = []
+    matches: list[tuple[float, str]] = []
+
     for reference, student in rows:
         try:
-            vector = np.asarray(json.loads(reference.embedding), dtype=np.float64)
+            data = json.loads(reference.embedding)
+            arr = np.asarray(data, dtype=np.float64)
         except (ValueError, TypeError):
             continue
-        if vector.shape != (128,) or not np.isfinite(vector).all():
+
+        if arr.ndim == 1:
+            if arr.shape != (128,):
+                continue
+            norm_val = float(np.linalg.norm(arr))
+            if abs(norm_val - 1.0) < 1e-3:
+                if not _warned_l2_legacy:
+                    logger.warning("embedding cu da chuan hoa L2, nen dang ky lai")
+                    _warned_l2_legacy = True
+            arr = arr.reshape(1, 128)
+        elif arr.ndim == 2:
+            if arr.shape[1] != 128 or arr.shape[0] == 0:
+                continue
+        else:
             continue
-        dist = float(np.linalg.norm(vector - probe))
-        if not np.isfinite(dist):
+
+        if not np.isfinite(arr).all():
             continue
-        matches.append((dist, student.student_code))
+
+        # Khoảng cách Euclid vector hóa giữa probe và tất cả mẫu của sinh viên này
+        diffs = arr - probe
+        distances = np.linalg.norm(diffs, axis=1)
+        min_dist = float(np.min(distances))
+        if not np.isfinite(min_dist):
+            continue
+        matches.append((min_dist, student.student_code))
+
     matches.sort(key=lambda m: m[0])
     if not matches or matches[0][0] > thresh:
         return None

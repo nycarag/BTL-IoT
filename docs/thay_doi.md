@@ -55,3 +55,28 @@
 * **Kết quả kiểm thử thực tế:**
   * Lệnh: `PYTHONPATH=backend /tmp/claude-1000/-home-nycarag/a5456080-ab66-4d8b-a6cf-843b3c5e2231/scratchpad/venv/bin/python -m pytest backend/tests -q`
   * Kết quả: **48 passed in 12.77s**.
+
+## Task T03: Sửa Bất Nhất Vector Đặc Trưng (Bỏ L2-Norm Enrollment) & Hỗ Trợ Đa Mẫu Tham Chiếu
+
+* **Ngày thực hiện:** 03/11/2026
+* **Nhánh git:** `overhaul/v2`
+
+### Danh sách tệp thay đổi
+
+| Tệp tin | Nội dung thay đổi | Lý do kỹ thuật |
+|---|---|---|
+| `backend/app/api/students.py` | Khi enroll ảnh khuôn mặt: bỏ việc tính trung bình và chia chuẩn L2-norm (`norm = np.linalg.norm; avg_vec = avg_vec / norm`); lưu toàn bộ danh sách vector thô của 1..N ảnh vào `FaceReference.embedding` dưới dạng JSON list-of-lists `[[128 số], ...]`. | Khắc phục sai lệch thang đo nghiêm trọng giữa vector thô lúc nhận diện (dlib norm ~1.36-1.39) và vector đã chuẩn hóa L2 lúc đăng ký (norm = 1.0); bảo toàn đặc trưng đa góc nhìn. |
+| `backend/seed.py` | Cập nhật logic tự động sinh vector khuôn mặt từ thư mục `data/faces/`: lưu toàn bộ danh sách vector thô dưới dạng JSON list-of-lists thay vì lấy trung bình rồi chia L2-norm. | Đồng bộ chuẩn lưu trữ embedding trên toàn hệ thống. |
+| `backend/app/services/face_recognition.py` | 1. Trong `match()`: với mỗi sinh viên có nhiều mẫu ảnh ($M \times 128$), tính khoảng cách Euclid vector hóa bằng numpy (`np.linalg.norm(arr - probe, axis=1)`) và lấy khoảng cách nhỏ nhất `min_dist` đại diện cho sinh viên đó.<br>2. So sánh ngưỡng và margin giữa sinh viên top 1 và sinh viên top 2 (đảm bảo margin tính giữa 2 sinh viên khác nhau, không phạt margin giữa 2 mẫu của cùng một người).<br>3. Tương thích ngược: nếu embedding cũ là 1-D (128 số) thì coi là 1 mẫu; ghi log WARNING 1 lần nếu vector có norm $\approx 1.0$ (phát hiện vector chuẩn hóa L2 cũ). | Tối ưu độ chính xác nhận diện đa góc mặt, hỗ trợ tương thích ngược dữ liệu cũ và cảnh báo chuẩn hóa L2. |
+| `backend/tests/test_pipeline.py` | Thêm 3 bài unit test:<br>1. `test_match_multi_sample_reference`: kiểm tra sinh viên có nhiều mẫu ảnh, hệ thống lấy đúng mẫu có khoảng cách nhỏ nhất.<br>2. `test_match_legacy_1d_and_warning`: kiểm tra dữ liệu 1-D legacy cũ vẫn khớp bình thường và phát ra log WARNING.<br>3. `test_margin_between_different_students_not_within_same_student`: kiểm tra 2 mẫu gần nhau của cùng 1 sinh viên không kích hoạt vi phạm margin; chỉ vi phạm khi 2 sinh viên khác nhau có khoảng cách quá sát nhau (< margin). | Kiểm chứng tự động toàn diện thuật toán so khớp đa mẫu. |
+| `backend/tests/test_workflows.py` | Thêm test `test_enrollment_multiple_images_stores_list_of_lists`: kiểm tra endpoint upload 2 ảnh và xác thực cơ sở dữ liệu lưu trữ đúng định dạng list-of-lists 2 phần tử 128 chiều. | Đảm bảo tính toàn vẹn của API đăng ký khuôn mặt nhiều ảnh. |
+| `docs/model-evaluation.md` | Bổ sung mục đánh giá thực nghiệm nhận diện trên ảnh thật từ repo chuẩn `ageitgey/face_recognition` (`obama.jpg`, `obama2.jpg`, `biden.jpg`), đo lường norm thô thực tế và ma trận khoảng cách Euclid thật. | Cung cấp bằng chứng thực nghiệm rõ ràng, minh bạch cho hệ thống nhận diện. |
+
+### Kết quả kiểm thử thực tế
+
+1. **Backend Unit Tests:**
+   * Lệnh: `PYTHONPATH=backend /tmp/claude-1000/-home-nycarag/a5456080-ab66-4d8b-a6cf-843b3c5e2231/scratchpad/venv/bin/python -m pytest backend/tests -q`
+   * Kết quả: **52 passed in 12.46s** (toàn bộ 48 bài test trước đó + 4 bài unit test mới cho T03 đều PASS).
+2. **Đo nghiệm ảnh thật (`scratchpad/work/eval_real_faces.py`):**
+   * Cặp cùng người (`obama.jpg` $\leftrightarrow$ `obama2.jpg`): khoảng cách **0.3457** (< ngưỡng 0.60).
+   * Cặp khác người (`obama.jpg` $\leftrightarrow$ `biden.jpg`): khoảng cách **0.8402** (> ngưỡng 0.60).

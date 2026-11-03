@@ -125,6 +125,57 @@ class PipelineTests(unittest.TestCase):
             self.assertNotIn(f"stale_{i}", last_frames)
         last_frames.clear()
 
+    def test_match_multi_sample_reference(self):
+        probe = np.zeros(128, dtype=np.float64)
+        # Sinh viên SV1 có 3 mẫu: mẫu 1 cách 0.55, mẫu 2 cách 0.35, mẫu 3 cách 0.60
+        vec1 = [0.55] + [0.0] * 127
+        vec2 = [0.35] + [0.0] * 127
+        vec3 = [0.60] + [0.0] * 127
+        ref_multi = SimpleNamespace(embedding=json.dumps([vec1, vec2, vec3]))
+        stu1 = SimpleNamespace(student_code="SV1")
+
+        # Phải lấy min_dist = 0.35
+        res = match(probe, [(ref_multi, stu1)], threshold=0.50, margin=0.05)
+        self.assertIsNotNone(res)
+        self.assertEqual(res.student_code, "SV1")
+        self.assertAlmostEqual(res.distance, 0.35, places=5)
+
+    def test_match_legacy_1d_and_warning(self):
+        probe = np.zeros(128, dtype=np.float64)
+        # Vector 128 số có norm = 1.0 (chuẩn hóa L2 cũ)
+        vec_l2 = [1.0] + [0.0] * 127
+        ref_legacy = SimpleNamespace(embedding=json.dumps(vec_l2))
+        stu = SimpleNamespace(student_code="SV_LEGACY")
+
+        with self.assertLogs("app.services.face_recognition", level="WARNING") as cm:
+            res = match(probe, [(ref_legacy, stu)], threshold=1.5, margin=0.05)
+            self.assertIsNotNone(res)
+            self.assertEqual(res.student_code, "SV_LEGACY")
+            self.assertTrue(any("embedding cu da chuan hoa L2, nen dang ky lai" in msg for msg in cm.output))
+
+    def test_margin_between_different_students_not_within_same_student(self):
+        probe = np.zeros(128, dtype=np.float64)
+        # SV1 có 2 mẫu: mẫu A cách 0.40, mẫu B cách 0.42
+        vec_sv1_a = [0.40] + [0.0] * 127
+        vec_sv1_b = [0.42] + [0.0] * 127
+        ref_sv1 = SimpleNamespace(embedding=json.dumps([vec_sv1_a, vec_sv1_b]))
+        stu1 = SimpleNamespace(student_code="SV1")
+
+        # Nếu chỉ có SV1: không được vi phạm margin vì 0.40 và 0.42 là cùng 1 người!
+        res = match(probe, [(ref_sv1, stu1)], threshold=0.50, margin=0.05)
+        self.assertIsNotNone(res)
+        self.assertEqual(res.student_code, "SV1")
+        self.assertAlmostEqual(res.distance, 0.40, places=5)
+
+        # Bây giờ thêm SV2 có mẫu cách 0.43 (khác sinh viên)
+        vec_sv2 = [0.43] + [0.0] * 127
+        ref_sv2 = SimpleNamespace(embedding=json.dumps([vec_sv2]))
+        stu2 = SimpleNamespace(student_code="SV2")
+
+        # Giữa SV1 (0.40) và SV2 (0.43): chênh lệch 0.03 < margin 0.05 -> Ambiguous -> None!
+        res_ambiguous = match(probe, [(ref_sv1, stu1), (ref_sv2, stu2)], threshold=0.50, margin=0.05)
+        self.assertIsNone(res_ambiguous)
+
 
 if __name__ == "__main__":
     unittest.main()

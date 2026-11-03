@@ -136,23 +136,21 @@ def main() -> None:
                 student = db.scalar(select(Student).where(Student.student_code == code))
                 if not student:
                     continue
-                # Average encodings if multiple photos exist
-                avg_vec = np.mean(enc_list, axis=0)
-                norm = np.linalg.norm(avg_vec)
-                if norm > 0:
-                    avg_vec = avg_vec / norm
+                # Lưu tất cả các vector thô dưới dạng list-of-lists (không chuẩn hóa L2)
+                raw_vectors = [v.tolist() for v in enc_list]
+                embedding_json = json.dumps(raw_vectors)
 
                 ref = db.get(FaceReference, student.id)
                 if not ref:
                     ref = FaceReference(
                         student_id=student.id,
-                        embedding=json.dumps(avg_vec.tolist()),
+                        embedding=embedding_json,
                         enrolled_by="system_auto_seed",
                         consent_at=utcnow()
                     )
                     db.add(ref)
                 else:
-                    ref.embedding = json.dumps(avg_vec.tolist())
+                    ref.embedding = embedding_json
                     ref.consent_at = utcnow()
                 enrolled_count += 1
                 print(f"  -> Enrolled face for {code}: {student.name} ({len(enc_list)} photo samples)")
