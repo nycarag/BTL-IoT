@@ -20,7 +20,7 @@ Cách này tránh khác biệt routing Docker/WSL tới mạng SoftAP và **khô
 
 1. Khi còn Internet, tự build/chạy backend + frontend theo README. Docker image/model phải có sẵn trước khi chuyển sang Wi-Fi ESP32 không có Internet.
 2. Cấp nguồn ESP32, laptop kết nối `ESP32_DIEM_DANH` (password theo firmware bạn nạp). Windows báo “No Internet” là bình thường; giữ kết nối.
-3. Kiểm tra snapshot trong trình duyệt: <http://192.168.4.1:81/capture>. Phải thấy một ảnh. Đóng mọi tab `/stream` và tắt app BTL-IoT cũ đang đọc stream: server firmware cũ có thể bị stream liên tục chiếm nên `/capture` timeout.
+3. Kiểm tra snapshot trong trình duyệt: <http://192.168.4.1/capture>. Phải thấy một ảnh. Đóng mọi tab `/stream` và tắt app BTL-IoT cũ đang đọc stream nếu có: firmware đã phục vụ `/capture` trên cổng 80 độc lập với luồng stream cổng 81.
 4. Mở PowerShell tại dự án và kiểm tra:
 
 ```powershell
@@ -115,7 +115,7 @@ Backend không ghi SQLite mỗi frame preview, kiểm tra ảnh trong threadpool
 
 `CAMERA_PREVIEW_FPS=15` là mục tiêu, **chưa phải FPS đo thực tế**. Có thể thử 20 nếu Wi-Fi/CPU ổn và PREVIEW_MAX_FPS >= CAMERA_PREVIEW_FPS; nếu mạng không ổn, giảm 10–12. Không tăng FPS AI theo FPS video: giữ sampling .8s hoặc đo lại latency/stability. Không khắc phục được lỗi `No route to host` bằng cách tăng FPS.
 
-Firmware BTL-IoT cũ dùng stream port **81**. Sketch SoftAP mới của BTL-new dùng port **82**: đặt CAMERA_STREAM_URL tương ứng. Firmware chỉ chụp/nén JPEG/phát Wi-Fi; toàn bộ FE/BE/PAD/recognition chạy trên máy tính. Không cần nạp lại board hiện tại để dùng tối ưu bridge này.
+Cả firmware BTL-IoT và sketch SoftAP mới đều đã được chuẩn hóa theo kiến trúc CameraWebServer của Espressif: cổng **80** phục vụ `/capture` và `/status`, cổng **81** phục vụ luồng video `/stream`. Biến `CAMERA_STREAM_URL` mặc định được suy diễn tự động sang cổng 81 (`http://192.168.4.1:81/stream`), không còn sử dụng cổng 82. Firmware chỉ chụp/nén JPEG/phát Wi-Fi; toàn bộ FE/BE/PAD/recognition chạy trên máy tính. Không cần nạp lại board hiện tại nếu firmware của bạn đã đáp ứng các cổng này.
 
 Nếu firmware không có stream, đặt CAMERA_TRANSPORT=snapshot để fallback; preview/AI vẫn tách nhưng tốc độ bị giới hạn bởi HTTP capture. Không tự fallback song song khi stream lỗi, tránh khóa server ESP32 cũ.
 

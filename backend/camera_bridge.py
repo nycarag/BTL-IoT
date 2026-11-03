@@ -15,7 +15,7 @@ import secrets
 import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urlparse, urlsplit, urlunsplit
 from urllib.request import ProxyHandler, Request, build_opener
 
 LOG = logging.getLogger("camera-bridge")
@@ -36,6 +36,16 @@ def load_env(path: Path):
             if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
                 value = value[1:-1]
             os.environ.setdefault(key.strip(), value)
+
+
+def infer_stream_url(capture_url: str) -> str:
+    """Derive default MJPEG stream URL (port 81, path /stream) from camera capture URL."""
+    parsed = urlsplit(capture_url)
+    if not parsed.hostname:
+        raise ValueError(f"Invalid capture URL: missing hostname in {capture_url}")
+    scheme = parsed.scheme or "http"
+    netloc = f"{parsed.hostname}:81"
+    return urlunsplit((scheme, netloc, "/stream", "", ""))
 
 
 class LatestFrame:
@@ -223,7 +233,7 @@ class CameraBridge:
     def run(self):
         latest = LatestFrame()
         stop = threading.Event()
-        stream_url = os.getenv("CAMERA_STREAM_URL", self.camera_url.rsplit("/", 1)[0] + "/stream")
+        stream_url = os.getenv("CAMERA_STREAM_URL") or infer_stream_url(self.camera_url)
         parsed = urlparse(stream_url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
             raise ValueError("CAMERA_STREAM_URL must be an HTTP(S) URL without credentials")
@@ -348,7 +358,7 @@ def main():
         webcam_id = args.webcam_id if args.webcam else None
         default_dev = "webcam-01" if args.webcam else "esp32-cam-01"
         bridge = CameraBridge(
-            os.getenv("CAMERA_CAPTURE_URL", "http://192.168.4.1:81/capture"),
+            os.getenv("CAMERA_CAPTURE_URL", "http://192.168.4.1/capture"),
             os.getenv("BRIDGE_BACKEND_URL", "http://127.0.0.1:" + os.getenv("BACKEND_PORT", "8000")),
             os.getenv("CAMERA_DEVICE_ID", default_dev), os.getenv("DEVICE_TOKEN", "esp32_device_secret_token_ptit"),
             float(os.getenv("CAMERA_INTERVAL_SECONDS", ".5")), float(os.getenv("CAMERA_TIMEOUT_SECONDS", "5")),

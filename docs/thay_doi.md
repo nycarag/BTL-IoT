@@ -498,6 +498,28 @@ Hệ thống đã tải `arduino-cli` và cài đặt gói board `esp32:esp32@3.
 - Backend Tests: `PYTHONPATH=backend pytest backend/tests -q` $\rightarrow$ **81 passed, 3 warnings in 14.45s** (100% test suite vượt qua).
 - Frontend Build: `npm run build` $\rightarrow$ **Thành công 100% (0 lỗi TypeScript)**.
 
+## [2026-11-03] REWORK T10: Chuẩn hóa cổng mặc định cho cầu nối camera và Docker Compose
+
+### Bối cảnh & Lý do chỉnh sửa
+Sau khi Task T10 nâng cấp firmware tách cổng theo chuẩn CameraWebServer (Port 80 cho `/capture` và `/status`, Port 81 cho `/stream`), phía máy tính (host) và Docker compose vẫn còn trỏ mặc định snapshot capture vào cổng 81:
+1. `backend/camera_bridge.py:351`: giá trị mặc định là `"http://192.168.4.1:81/capture"`, khiến lệnh kiểm tra `python camera_bridge.py --check` hoặc chế độ snapshot gặp lỗi 404.
+2. `backend/camera_bridge.py:226`: logic cũ suy diễn `stream_url` bằng `self.camera_url.rsplit("/", 1)[0] + "/stream"`. Khi `capture_url` là `http://192.168.4.1/capture` (cổng 80 ngầm định), chuỗi suy ra sẽ là `http://192.168.4.1/stream` (vẫn cổng 80, sai cổng stream 81).
+3. `docker-compose.yml:110`: biến fallback `CAMERA_CAPTURE_URL` vẫn là `http://192.168.4.1:81/capture`.
+4. `docs/camera-softap.md`: dòng 23 trỏ link snapshot vào `:81/capture` và dòng 118 nhắc tới port 82 cũ.
+
+### Các thay đổi chi tiết
+
+| Tệp thay đổi | Loại thao tác | Mô tả chi tiết | Mục đích / Tác động |
+|---|---|---|---|
+| `backend/camera_bridge.py` | Chỉnh sửa | 1. Hàm `infer_stream_url(capture_url)`: sử dụng `urllib.parse.urlsplit` và `urlunsplit`, trích xuất `scheme` và `hostname`, ép cổng `:81` và đường dẫn `/stream`.<br>2. Cập nhật `run()`: ưu tiên biến môi trường `CAMERA_STREAM_URL` nếu được thiết lập, fallback tự động qua `infer_stream_url(self.camera_url)`.<br>3. Cập nhật `main()`: đổi giá trị mặc định của `CAMERA_CAPTURE_URL` thành `"http://192.168.4.1/capture"`. | Sửa lỗi 404 khi chạy `--check` hoặc snapshot; tự động suy diễn chính xác cổng 81 cho luồng stream từ capture URL. |
+| `backend/tests/test_camera_bridge.py` | Chỉnh sửa | Cập nhật URL mẫu thành `http://192.168.4.1/capture`, bổ sung test case `test_infer_stream_url` kiểm tra các trường hợp: `http://192.168.4.1/capture` $\rightarrow$ `http://192.168.4.1:81/stream`, `http://10.0.0.5:8080/capture` $\rightarrow$ `http://10.0.0.5:81/stream`, URL https và trường hợp URL thiếu host. | Kiểm thử tự động hồi quy logic suy diễn stream URL. |
+| `docker-compose.yml` | Chỉnh sửa | Đổi `CAMERA_CAPTURE_URL: ${CAMERA_CAPTURE_URL:-http://192.168.4.1/capture}` (cổng 80). | Đồng bộ cấu hình container cầu nối camera SoftAP với firmware mới. |
+| `docs/camera-softap.md` | Chỉnh sửa | 1. Sửa link kiểm tra snapshot ở bước 3 thành `<http://192.168.4.1/capture>`.<br>2. Cập nhật mục kiến trúc port loại bỏ hoàn toàn thông tin cổng 82 cũ, khẳng định chuẩn cổng 80 (capture) và 81 (stream). | Đảm bảo tài liệu hướng dẫn vận hành chuẩn xác. |
+| `docs/thay_doi.md` | Chỉnh sửa | Ghi nhận chi tiết thay đổi REWORK T10. | Nhật ký phát triển hệ thống. |
+
+### Kết quả kiểm thử tự động
+- `PYTHONPATH=backend pytest backend/tests -q`: **82 passed, 3 warnings in 14.40s** (tăng thêm 1 test case mới, 100% test suite đạt chuẩn).
+
 
 
 
