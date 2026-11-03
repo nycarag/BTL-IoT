@@ -100,7 +100,6 @@ class AntiSpoofAdapter:
         self.session = None
         self.reason = "PAD model is not configured"
         self.model = "MiniFASNetV2 ONNX"
-        self._consecutive_counts: dict[str, int] = {}
 
         path = Path(settings.pad_model_path) if settings.pad_model_path else None
         if path is None:
@@ -141,14 +140,10 @@ class AntiSpoofAdapter:
             and 0.0 < settings.pad_real_threshold < 1.0
         )
 
-    def reset_device(self, device_id: str) -> None:
-        self._consecutive_counts.pop(device_id, None)
-
     def evaluate(
         self,
         frame: np.ndarray,
         box: tuple[int, int, int, int] | None = None,
-        device_id: str | None = None,
     ) -> PadResult:
         if frame is None or not isinstance(frame, np.ndarray) or frame.ndim != 3 or box is None:
             return PadResult(False, "valid detected face is required")
@@ -166,20 +161,7 @@ class AntiSpoofAdapter:
             if not self.ready:
                 return PadResult(False, self.reason, score)
 
-            is_real_frame = (
-                int(np.argmax(probs[0])) == 1 and score >= settings.pad_real_threshold
-            )
-
-            if device_id:
-                if is_real_frame:
-                    count = self._consecutive_counts.get(device_id, 0) + 1
-                    self._consecutive_counts[device_id] = count
-                else:
-                    self._consecutive_counts.pop(device_id, None)
-                    count = 0
-                passed = is_real_frame and count >= settings.pad_min_consecutive
-            else:
-                passed = is_real_frame
+            passed = int(np.argmax(probs[0])) == 1 and score >= settings.pad_real_threshold
 
             return PadResult(
                 passed,

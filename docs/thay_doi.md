@@ -182,11 +182,9 @@
 
 | Tệp tin | Hành động | Nội dung thay đổi | Lý do kỹ thuật |
 |---|---|---|---|
-| `backend/app/services/antispoof.py` | Chỉnh sửa | 1. Bổ sung hàm `_get_new_box` tuân thủ 100% thuật toán của Minivision (`minivision-ai/Silent-Face-Anti-Spoofing` `src/generate_patches.py`): thay vì cắt cụt box khi ở gần mép ảnh (`max(0, ...)`), thuật toán dịch chuyển box vào trong biên ảnh (`right_bottom_x -= left_top_x`, v.v.), bảo toàn trọn vẹn tỷ lệ aspect ratio và ngữ cảnh khuôn mặt.<br>2. Giữ nguyên toàn bộ quy ước tiền xử lý gốc: BGR, 0..255 float32, không chia 255, không trừ mean/std, tensor shape NCHW `(1, 3, 80, 80)`, class index 1 = Real.<br>3. Trong `AntiSpoofAdapter`: bổ sung hỗ trợ cấu hình số khung hình liên tiếp đạt PAD (`pad_min_consecutive`) theo `device_id` và hàm `reset_device`. | Chuẩn hóa tiền xử lý khuôn mặt khớp tuyệt đối với mô hình gốc được huấn luyện; ngăn chặn biến dạng khuôn mặt ở sát biên ảnh; hỗ trợ lọc nhiễu liên khung hình. |
-| `backend/app/core/config.py` | Chỉnh sửa | Bổ sung biến cấu hình `pad_min_consecutive: int = max(1, int(os.getenv("PAD_MIN_CONSECUTIVE", "1")))`. | Cho phép cấu hình số frame PAD liên tiếp qua biến môi trường. |
-| `backend/.env.example` | Chỉnh sửa | Bổ sung biến mẫu `PAD_MIN_CONSECUTIVE=1`, `PAD_REAL_THRESHOLD=0.45`, `PAD_CROP_SCALE=2.7`. | Hoàn thiện hướng dẫn cấu hình môi trường cho module PAD. |
-| `backend/tests/test_pipeline.py` | Chỉnh sửa | Bổ sung 2 bài unit test mới:<br>1. `test_get_new_box_shifts_instead_of_truncating`: kiểm tra box ở sát biên trái, phải, trên đều được dịch chuyển vào trong ảnh để bảo toàn đúng kích thước mở rộng `box_w * scale`.<br>2. `test_pad_consecutive_frames_requirement`: kiểm tra cơ chế yêu cầu nhiều frame liên tiếp đạt ngưỡng PAD trước khi xác nhận `is_real=True`, và kiểm tra `reset_device`. | Đảm bảo tính đúng đắn thuật toán và ngăn ngừa hồi quy. |
-| `docs/model-evaluation.md` | Chỉnh sửa | 1. Đính chính nhận định sai lầm trong báo cáo P0 (giữ nguyên tỷ lệ mở rộng khuôn mặt của tác giả gốc, không ép vuông).<br>2. Bảng đối chiếu chi tiết 8 bước tiền xử lý với nguồn gốc Minivision và yakhyo.<br>3. Bảng số liệu đo nghiệm thực tế trên tập ảnh mẫu chuẩn (`image_T1.jpg`, `image_F1.jpg`, `image_F2.jpg`) và ảnh chân dung `obama.jpg` (cả bản gốc và bản CIF 400×296).<br>4. Khuyến nghị giữ nguyên ngưỡng mặc định `0.45` từ config, không tự ý thay đổi khi chưa có tập dữ liệu calibration thực địa. | Cung cấp tài liệu thẩm định kỹ thuật đầy đủ, trung thực và khoa học. |
+| `backend/app/services/antispoof.py` | Chỉnh sửa | 1. Bổ sung hàm `_get_new_box` tuân thủ 100% thuật toán của Minivision (`minivision-ai/Silent-Face-Anti-Spoofing` `src/generate_patches.py`): thay vì cắt cụt box khi ở gần mép ảnh (`max(0, ...)`), thuật toán dịch chuyển box vào trong biên ảnh (`right_bottom_x -= left_top_x`, v.v.), bảo toàn trọn vẹn tỷ lệ aspect ratio và ngữ cảnh khuôn mặt.<br>2. Giữ nguyên toàn bộ quy ước tiền xử lý gốc: BGR, 0..255 float32, không chia 255, không trừ mean/std, tensor shape NCHW `(1, 3, 80, 80)`, class index 1 = Real. | Chuẩn hóa tiền xử lý khuôn mặt khớp tuyệt đối với mô hình gốc được huấn luyện; ngăn chặn biến dạng khuôn mặt ở sát biên ảnh. |
+| `backend/tests/test_pipeline.py` | Chỉnh sửa | Bổ sung unit test `test_get_new_box_shifts_instead_of_truncating`: kiểm tra box ở sát biên trái, phải, trên đều được dịch chuyển vào trong ảnh để bảo toàn đúng kích thước mở rộng `box_w * scale`. | Đảm bảo tính đúng đắn thuật toán và ngăn ngừa hồi quy. |
+| `docs/model-evaluation.md` | Chỉnh sửa | 1. Đính chính nhận định sai lầm trong báo cáo P0 (giữ nguyên tỷ lệ mở rộng khuôn mặt của tác giả gốc, không ép vuông).<br>2. Bảng đối chiếu chi tiết 8 bước tiền xử lý với nguồn gốc Minivision và yakhyo.<br>3. Bảng số liệu đo nghiệm thực tế trên tập ảnh mẫu chuẩn (`image_T1.jpg`, `image_F1.jpg`, `image_F2.jpg`) và ảnh chân dung `obama.jpg` (cả bản gốc và bản CIF 400×296).<br>4. Khuyến nghị giữ nguyên ngưỡng mặc định `0.45` từ config; ghi nhận trung thực giới hạn mô hình đơn lẻ với ảnh moire (0.8746) cần thêm liveness chủ động. | Cung cấp tài liệu thẩm định kỹ thuật đầy đủ, trung thực và khoa học. |
 
 ### Kết quả đo nghiệm thực tế mô hình PAD
 
@@ -199,12 +197,23 @@
    - `obama.jpg` (chân dung gốc): `is_real = True`, **score = 0.999967**.
    - `obama_cif.jpg` (ESP32-CAM độ phân giải CIF 400×296): `is_real = True`, **score = 0.999997**.
 3. **Ảnh giả lập màn hình LCD (Moire pattern):**
-   - Thêm lưới sọc tần số cao: score giảm rõ rệt xuống **0.874581**.
+   - Thêm lưới sọc tần số cao: score giảm xuống **0.874581** nhưng vẫn vượt ngưỡng pass (0.45) $\rightarrow$ MiniFASNetV2 đơn lẻ không đủ chống tấn công phát lại màn hình chất lượng cao; cần lớp liveness chủ động (task sau).
+
+### Rework T06: Gỡ Bỏ Code Chết PAD_MIN_CONSECUTIVE & Cập Nhật Giới Hạn Replay
+
+* **Ngày thực hiện:** 03/11/2026
+* **Lý do kỹ thuật (Anti-overengineering & Epistemic Humility):** Tính năng `PAD_MIN_CONSECUTIVE` không được gọi trong luồng production `backend/app/api/attendance.py` (không truyền `device_id`, không ai gọi `reset_device`), việc lưu trữ bộ đếm và giới thiệu trong tài liệu/env là code chết và gây hiểu lầm. Đồng thời việc kiểm tra chống giả mạo liên khung hình sẽ được giải quyết triệt để và tự nhiên bằng liveness chủ động (như phát hiện chớp mắt) ở task sau.
+* **Hành động khắc phục:**
+  1. Gỡ bỏ hoàn toàn `_consecutive_counts`, `reset_device()`, tham số `device_id` khỏi `AntiSpoofAdapter.evaluate()`.
+  2. Gỡ bỏ biến cấu hình `pad_min_consecutive` khỏi `Settings` và xóa dòng `PAD_MIN_CONSECUTIVE=1` trong `.env.example`.
+  3. Xóa bài test `test_pad_consecutive_frames_requirement` trong `test_pipeline.py`.
+  4. Cập nhật `docs/model-evaluation.md`: xóa khuyến nghị số 2 và bổ sung phân tích trung thực về giới hạn của mô hình MiniFASNetV2 tĩnh đối với replay màn hình (score 0.8746) để làm tiền đề cho liveness chủ động.
 
 ### Kết quả kiểm thử tự động
 
 - Lệnh thực thi: `PYTHONPATH=backend pytest backend/tests -q`
-- Kết quả: **69 passed in 5.35s** (toàn bộ 67 bài test trước đó + 2 bài unit test mới cho T06 đều PASS 100%).
+- Kết quả: **68 passed** (toàn bộ 67 bài test trước đó + 1 unit test mới `test_get_new_box_shifts_instead_of_truncating` đều PASS 100%).
+
 
 
 

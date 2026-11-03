@@ -251,41 +251,6 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(bottom_t, 216)
         self.assertEqual(bottom_t - top_t, 216)  # Full height preserved!
 
-    def test_pad_consecutive_frames_requirement(self):
-        from unittest.mock import MagicMock
-        adapter = AntiSpoofAdapter.__new__(AntiSpoofAdapter)
-        adapter._consecutive_counts = {}
-        adapter.session = MagicMock()
-        adapter.input_name = "input"
-        adapter.output_name = "output"
-        # Logits that result in class 1 (Real) with high probability
-        adapter.session.run.return_value = [np.array([[0.0, 10.0, 0.0]], dtype=np.float32)]
-
-        dummy_frame = np.full((160, 160, 3), 128, dtype=np.uint8)
-        box = (40, 40, 80, 80)
-
-        mock_settings = SimpleNamespace(
-            pad_calibrated=True,
-            pad_real_threshold=0.45,
-            pad_crop_scale=2.7,
-            pad_min_consecutive=2,
-        )
-
-        with patch("app.services.antispoof.settings", mock_settings):
-            # Frame 1: Real frame, but consecutive count = 1 < 2 -> is_real is False
-            res1 = adapter.evaluate(dummy_frame, box, device_id="cam_01")
-            self.assertFalse(res1.is_real)
-            self.assertGreater(res1.score, 0.99)
-
-            # Frame 2: Real frame, consecutive count = 2 >= 2 -> is_real is True
-            res2 = adapter.evaluate(dummy_frame, box, device_id="cam_01")
-            self.assertTrue(res2.is_real)
-
-            # Reset device -> consecutive count resets
-            adapter.reset_device("cam_01")
-            res3 = adapter.evaluate(dummy_frame, box, device_id="cam_01")
-            self.assertFalse(res3.is_real)
-
 
 if __name__ == "__main__":
     unittest.main()

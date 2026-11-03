@@ -38,16 +38,13 @@ Kiểm tra trực tiếp mô hình ONNX `MiniFASNetV2.onnx` với tiền xử l�
 | `image_F2.jpg` (Minivision sample) | Mặt giả mạo 2 (Cut-out) | `(139, 217, 223, 298)` | **False** (`spoof or uncertain`) | **0.004053** (~0.40%) | Ngăn chặn chính xác mặt giả mạo |
 | `obama.jpg` (Chân dung thật) | Chân dung chụp gốc | `(374, 94, 231, 322)` | **True** (`PAD passed`) | **0.999967** (~99.99%) | Chấp thuận mặt thật |
 | `obama_cif.jpg` (ESP32-CAM CIF) | Chân dung resize CIF 400×296 | `(166, 18, 98, 98)` | **True** (`PAD passed`) | **0.999997** (~99.99%) | Chấp thuận mặt thật ở độ phân giải camera IoT |
-| `obama.jpg` + Moire pattern | Ảnh thêm hiệu ứng sọc màn hình LCD | `(374, 94, 231, 322)` | **True** (`PAD passed`) | **0.874581** (~87.46%) | Score giảm đáng kể khi có nhiễu màn hình |
+| `obama.jpg` + Moire pattern | Ảnh thêm hiệu ứng sọc màn hình LCD | `(374, 94, 231, 322)` | **True** (`PAD passed`) | **0.874581** (~87.46%) | Score giảm xuống 0.8746 nhưng vẫn vượt ngưỡng pass (0.45). Kết quả này cho thấy mô hình MiniFASNetV2 đơn lẻ không đủ khả năng chống tấn công phát lại (replay attack) từ màn hình chất lượng cao; hệ thống bắt buộc cần bổ sung lớp kiểm tra liveness chủ động (như phát hiện chớp mắt ở task sau). |
 
-### Khuyến nghị cấu hình ngưỡng & số khung hình liên tiếp
+### Khuyến nghị cấu hình ngưỡng PAD
 
-1. **Ngưỡng `PAD_REAL_THRESHOLD`:**
-   - Giá trị mặc định hiện tại là `0.45` (từ cấu hình `settings.pad_real_threshold`).
-   - **Khuyến nghị:** **KHÔNG tự ý thay đổi con số này** nếu chưa có tập dữ liệu calibration thực tế đo đạc trực tiếp trên camera ESP32-CAM trong môi trường phòng học cụ thể. Do mô hình MiniFASNet rất nhạy với chất lượng cảm biến OV2640, ống kính và ánh sáng thực địa, bất kỳ việc nâng/hạ ngưỡng võ đoán nào cũng có thể làm tăng vọt BPCER (từ chối người thật) hoặc APCER (lọt kẻ giả mạo).
-2. **Số khung hình liên tiếp `PAD_MIN_CONSECUTIVE`:**
-   - Hệ thống hỗ trợ cấu hình biến môi trường `PAD_MIN_CONSECUTIVE` (mặc định `1` = hành vi cũ).
-   - Khi triển khai môi trường thực tế với camera phát video stream, có thể cấu hình `PAD_MIN_CONSECUTIVE=2` hoặc `3` để yêu cầu 2-3 frame liên tiếp đạt điều kiện chống giả mạo trước khi cho phép điểm danh, giúp lọc triệt để các frame nhiễu ngẫu nhiên.
+- Giá trị mặc định hiện tại là `PAD_REAL_THRESHOLD=0.45` (từ cấu hình `settings.pad_real_threshold`).
+- **Khuyến nghị:** **KHÔNG tự ý thay đổi con số này** nếu chưa có tập dữ liệu calibration thực tế đo đạc trực tiếp trên camera ESP32-CAM trong môi trường phòng học cụ thể. Do mô hình MiniFASNet rất nhạy với chất lượng cảm biến OV2640, ống kính và ánh sáng thực địa, bất kỳ việc nâng/hạ ngưỡng võ đoán nào cũng có thể làm tăng vọt BPCER (từ chối người thật) hoặc APCER (lọt kẻ giả mạo).
+
 
 ## Quy trình thu thập
 
