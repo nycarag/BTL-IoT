@@ -2,17 +2,38 @@
 
 from __future__ import annotations
 
+import logging
 import os
-from dataclasses import dataclass
+import secrets
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
 load_dotenv(ROOT_DIR / ".env")
 load_dotenv(ROOT_DIR / "backend" / ".env")
 DATA_DIR = Path(os.getenv("ATTENDANCE_DATA_DIR", ROOT_DIR / "data"))
 DEFAULT_PAD_MODEL = str(ROOT_DIR / "models" / "minifasnet-v2" / "MiniFASNetV2.onnx")
+
+DEFAULT_CORS_ORIGIN_REGEX = (
+    r"^https?://(?:localhost|127\.0\.0\.1|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
+    r"172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|"
+    r"192\.168\.\d{1,3}\.\d{1,3})(?::\d+)?$"
+)
+
+
+def _resolve_secret_key() -> str:
+    key = os.getenv("SECRET_KEY", "").strip()
+    if not key:
+        key = secrets.token_hex(32)
+        logger.warning(
+            "SECRET_KEY is not set in environment; generated ephemeral key. "
+            "Tokens will be invalidated on server restart."
+        )
+    return key
 
 
 @dataclass(frozen=True)
@@ -22,6 +43,7 @@ class Settings:
     device_token: str = os.getenv("DEVICE_TOKEN", "esp32_device_secret_token_ptit")
     admin_username: str = os.getenv("ADMIN_USERNAME", "admin")
     admin_password: str = os.getenv("ADMIN_PASSWORD", "admin123456")
+    secret_key: str = field(default_factory=_resolve_secret_key)
     recognition_threshold: float = float(os.getenv("RECOGNITION_THRESHOLD", "0.52"))
     recognition_margin: float = float(os.getenv("RECOGNITION_MARGIN", "0.05"))
     min_face_area_ratio: float = float(os.getenv("MIN_FACE_AREA_RATIO", "0.03"))
@@ -43,6 +65,7 @@ class Settings:
             "http://localhost:8000,http://127.0.0.1:8000,http://localhost:8080,http://127.0.0.1:8080,http://localhost:5173,http://127.0.0.1:5173",
         ).split(",") if origin.strip()
     )
+    cors_origin_regex: str = os.getenv("CORS_ORIGIN_REGEX", DEFAULT_CORS_ORIGIN_REGEX).strip()
 
 
 settings = Settings()

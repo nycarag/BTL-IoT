@@ -18,34 +18,47 @@ CURRENT_DIR = Path(__file__).resolve().parent
 BEEP_SOUND_FILE = CURRENT_DIR / "beep_success.wav"
 
 
+def _try_play(audio_path: str | Path) -> bool:
+    target = str(audio_path)
+    for player in ("pw-play", "paplay", "aplay"):
+        if shutil.which(player):
+            try:
+                res = subprocess.run(
+                    [player, target],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
+                    check=False,
+                )
+                if res.returncode == 0:
+                    return True
+            except Exception:
+                continue
+    return False
+
+
 def _play_worker(sound_type: str = "success") -> None:
     try:
         if sound_type == "success":
-            if BEEP_SOUND_FILE.is_file():
-                # Try pw-play (PipeWire) then paplay (PulseAudio) then aplay (ALSA)
-                cmd = f"pw-play '{BEEP_SOUND_FILE}' >/dev/null 2>&1 || paplay '{BEEP_SOUND_FILE}' >/dev/null 2>&1 || aplay '{BEEP_SOUND_FILE}' >/dev/null 2>&1"
-                ret = os.system(cmd)
-                if ret == 0:
-                    return
+            if BEEP_SOUND_FILE.is_file() and _try_play(BEEP_SOUND_FILE):
+                return
             # Fallback to system completion chime if available
             system_chimes = [
                 "/usr/share/sounds/freedesktop/stereo/complete.oga",
                 "/usr/share/sounds/gnome/default/alerts/glass.ogg",
-                "/usr/share/sounds/sound-icons/prompt.wav"
+                "/usr/share/sounds/sound-icons/prompt.wav",
             ]
             for chime in system_chimes:
-                if os.path.exists(chime):
-                    os.system(f"paplay '{chime}' >/dev/null 2>&1 &")
+                if os.path.exists(chime) and _try_play(chime):
                     return
         elif sound_type == "alert":
             # Warning beep for PAD rejection
             system_alerts = [
                 "/usr/share/sounds/freedesktop/stereo/dialog-warning.oga",
-                "/usr/share/sounds/gnome/default/alerts/drip.ogg"
+                "/usr/share/sounds/gnome/default/alerts/drip.ogg",
             ]
             for alert in system_alerts:
-                if os.path.exists(alert):
-                    os.system(f"paplay '{alert}' >/dev/null 2>&1 &")
+                if os.path.exists(alert) and _try_play(alert):
                     return
     except Exception as exc:
         logger.debug(f"Audio playback error: {exc}")
