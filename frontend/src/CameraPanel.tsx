@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import {
   useCameraStream,
   computeContainOverlay,
@@ -26,35 +26,17 @@ const reasons: Record<string, string> = {
   "unknown, uncertain or unavailable identity": "Chưa nhận diện được — kiểm tra đăng ký khuôn mặt và trạng thái mô hình",
 };
 
-export default function CameraPanel({ api, devices, selectedSession, token, apiUrl }: Props) {
+export default function CameraPanel({ api: _api, devices, selectedSession, token, apiUrl }: Props) {
   const [camera, setCamera] = useState("");
   const [paused, setPaused] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const effectiveCamera = devices.some(d => d.id === camera) ? camera : devices[0]?.id ?? "";
-  const apiRef = useRef(api);
-  apiRef.current = api;
 
   // Stream hook duy nhất quản lý WebSocket, canvas rendering và FPS
   const { canvasRef, meta, fps, connected: hasSource, error: streamError, canvasSize } =
     useCameraStream(effectiveCamera, token, apiUrl, paused);
 
-  // Lấy config 1 lần lúc mount hoặc đổi camera (fallback khi chưa có meta từ WS)
-  const [fallbackConfig, setFallbackConfig] = useState<Preview["config"] | null>(null);
-  useEffect(() => {
-    if (!effectiveCamera) return;
-    let cancelled = false;
-    apiRef.current(`/devices/${encodeURIComponent(effectiveCamera)}/preview`)
-      .then(res => res.json())
-      .then((data: Preview) => {
-        if (!cancelled && data.config) {
-          setFallbackConfig(data.config);
-        }
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [effectiveCamera]);
-
-  const preview: Preview | null = meta || (fallbackConfig ? ({ available: false, config: fallbackConfig } as Preview) : null);
+  const preview = meta;
   const result = preview?.result;
   const error = streamError;
   const wrongSession = Boolean(preview && (selectedSession ? Number(selectedSession) !== preview.config.session_id : false));

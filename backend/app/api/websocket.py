@@ -50,6 +50,9 @@ def _preview_meta_payload(device_id: str, db: Session) -> dict:
     return {"type": "meta", **metadata, "config": config}
 
 
+META_INTERVAL_SECONDS: float = 2.0
+
+
 @router.websocket("/ws/devices/{device_id}/camera")
 async def camera_stream(websocket: WebSocket, device_id: str, db: Session = Depends(get_db)):
     from app.models import Device
@@ -70,18 +73,32 @@ async def camera_stream(websocket: WebSocket, device_id: str, db: Session = Depe
         listener = previews.subscribe(device_id)
         sequence = -1
         last_result_version = previews.get_result_version(device_id)
+
+        # Send initial meta immediately upon successful authentication
+        meta = _preview_meta_payload(device_id, db)
+        await asyncio.wait_for(websocket.send_json(meta), timeout=3)
+        last_meta_time = time.monotonic()
         last_auth_check = time.monotonic()
+
+        async def _maybe_send_meta(current_time: float) -> bool:
+            nonlocal last_result_version, last_meta_time
+            cur_version = previews.get_result_version(device_id)
+            if cur_version != last_result_version or (current_time - last_meta_time >= META_INTERVAL_SECONDS):
+                last_result_version = cur_version
+                last_meta_time = current_time
+                payload = _preview_meta_payload(device_id, db)
+                await asyncio.wait_for(websocket.send_json(payload), timeout=3)
+                return True
+            return False
+
         while True:
-            if time.monotonic() - last_auth_check > 60:
+            now = time.monotonic()
+            if now - last_auth_check > 60:
                 verify_token(credentials)
-                last_auth_check = time.monotonic()
+                last_auth_check = now
             listener.clear()
 
-            current_result_version = previews.get_result_version(device_id)
-            if current_result_version != last_result_version:
-                last_result_version = current_result_version
-                meta = _preview_meta_payload(device_id, db)
-                await asyncio.wait_for(websocket.send_json(meta), timeout=3)
+            await _maybe_send_meta(now)
 
             frame = previews.get(device_id)
             if frame and frame["sequence"] != sequence:
@@ -94,9 +111,11 @@ async def camera_stream(websocket: WebSocket, device_id: str, db: Session = Depe
                     raise ValueError("Expected frame acknowledgement")
             else:
                 try:
-                    await asyncio.wait_for(listener.wait(), timeout=1)
+                    time_until_meta = max(0.05, min(1.0, META_INTERVAL_SECONDS - (time.monotonic() - last_meta_time)))
+                    await asyncio.wait_for(listener.wait(), timeout=time_until_meta)
                 except asyncio.TimeoutError:
-                    if previews.get(device_id) is None:
+                    sent = await _maybe_send_meta(time.monotonic())
+                    if not sent and previews.get(device_id) is None:
                         await asyncio.wait_for(websocket.send_json({"type": "waiting"}), timeout=3)
     except asyncio.TimeoutError:
         await websocket.close(code=1013)

@@ -38,6 +38,49 @@ class PreviewApiTests(unittest.TestCase):
         self.assertFalse(self.client.get("/api/devices/cam/preview", headers=self.auth).json()["available"])
         self.assertEqual(self.client.get("/api/devices/cam/preview.jpg", headers=self.auth).status_code, 404)
 
+    def test_camera_websocket_sends_meta_immediately_and_periodically(self):
+        previews.frames.clear()
+        previews.results.clear()
+        token = self.auth["Authorization"].split()[1]
+
+        # Use 0.2s interval for fast test execution
+        with patch("app.api.websocket.META_INTERVAL_SECONDS", 0.2):
+            with self.client.websocket_connect("/ws/devices/cam/camera") as ws:
+                ws.send_json({"token": token})
+
+                # (a) Receives initial meta immediately upon auth
+                init_meta = ws.receive_json()
+                self.assertEqual(init_meta["type"], "meta")
+                self.assertIn("config", init_meta)
+                self.assertEqual(init_meta["config"]["session_id"], self.session_id)
+
+                # (b) Change config (new open session) without any AI frame
+                new_session_res = self.post("/sessions", {"class_id": self.class_id, "title": "Session 2"})
+                self.assertEqual(new_session_res.status_code, 201)
+                new_session_id = new_session_res.json()["id"]
+                self.post(f"/sessions/{new_session_id}/start", {})
+
+                res = self.client.put(
+                    "/api/devices/cam/config",
+                    headers=self.auth,
+                    json={"session_id": new_session_id},
+                )
+                self.assertEqual(res.status_code, 200)
+
+                # Client receives updated meta with new session_id within <= 3s
+                import time
+                start_wait = time.monotonic()
+                updated_meta = None
+                while time.monotonic() - start_wait < 3.0:
+                    msg = ws.receive_json()
+                    if msg.get("type") == "meta" and msg.get("config", {}).get("session_id") == new_session_id:
+                        updated_meta = msg
+                        break
+
+                self.assertIsNotNone(updated_meta, "Expected updated meta within 3 seconds")
+                self.assertEqual(updated_meta["type"], "meta")
+                self.assertEqual(updated_meta["config"]["session_id"], new_session_id)
+
     def test_camera_websocket_sends_meta_when_result_changes(self):
         previews.frames.clear()
         previews.results.clear()
@@ -47,6 +90,10 @@ class PreviewApiTests(unittest.TestCase):
 
         with self.client.websocket_connect("/ws/devices/cam/camera") as ws:
             ws.send_json({"token": token})
+
+            # Initial meta received immediately
+            init_meta = ws.receive_json()
+            self.assertEqual(init_meta["type"], "meta")
 
             # 1. Add preview frame -> receives binary frame
             previews.put("cam", jpeg_bytes, is_preview=True)

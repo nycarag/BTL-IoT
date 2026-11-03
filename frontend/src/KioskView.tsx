@@ -43,23 +43,7 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
   const { canvasRef, meta, fps, connected: hasSource, canvasSize } =
     useCameraStream(effectiveCamera, token, apiUrl, false);
 
-  // Lấy config 1 lần lúc mount hoặc đổi camera (fallback khi chưa có meta từ WS)
-  const [fallbackConfig, setFallbackConfig] = useState<Preview["config"] | null>(null);
-  useEffect(() => {
-    if (!effectiveCamera) return;
-    let cancelled = false;
-    apiRef.current(`/devices/${encodeURIComponent(effectiveCamera)}/preview`)
-      .then(r => r.json())
-      .then((data: Preview) => {
-        if (!cancelled && data.config) {
-          setFallbackConfig(data.config);
-        }
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [effectiveCamera]);
-
-  const preview: Preview | null = meta || (fallbackConfig ? ({ available: false, config: fallbackConfig } as Preview) : null);
+  const preview: Preview | null = meta;
   const roi = preview?.config;
   const result = preview?.result;
 

@@ -340,6 +340,48 @@ Do không có camera vật lý ESP32-CAM trong môi trường phát triển, h�
 - Kiểm thử Frontend: `npm run build` $\rightarrow$ **Thành công 100% (0 lỗi TypeScript, 35 modules transformed trong 1.06s)**.
 - Kiểm thử Backend: `PYTHONPATH=backend pytest backend/tests -q` $\rightarrow$ **80 passed** (100% test suite vượt qua).
 
+## Rework T08: Gửi Metadata Ban Đầu Sau Auth, Truyền Định Kỳ Config 2s & Loại Bỏ Polling Fallback Ở Frontend
+
+* **Ngày thực hiện:** 03/11/2026
+* **Nhánh git:** `overhaul/v2`
+
+### Vấn đề kỹ thuật được khắc phục
+
+1. **Client mới kết nối không nhận được metadata ban đầu:** Trước đây `last_result_version` được khởi tạo bằng `previews.get_result_version(device_id)`, khiến client sau khi kết nối không nhận được message `meta` nào cho đến khi kết quả AI thay đổi. Nếu camera chưa stream hoặc không có frame AI mới, client thiếu toàn bộ thông tin về cấu hình và trạng thái.
+2. **Cấu hình (session/ROI) thay đổi không được cập nhật nếu không có frame AI:** Khi giảng viên đổi buổi học hoặc cập nhật vùng ROI (`PUT /api/devices/{id}/config`) mà camera chưa gửi frame AI mới, result version không đổi, dẫn đến kiosk/CameraPanel giữ nguyên cấu hình cũ.
+3. **HTTP Fetch fallback thừa ở Frontend:** Do giải pháp cũ chưa đẩy meta ngay từ đầu, frontend phải gọi fallback `fetch(/devices/{id}/preview)` một lần lúc mount. Khi WS đã đảm bảo đẩy meta tức thời và định kỳ, request này trở nên dư thừa.
+
+### Giải pháp kỹ thuật
+
+1. **Phía Server (`backend/app/api/websocket.py`):**
+   - Đẩy payload `meta` ngay lập tức sau khi xác thực WebSocket và kiểm tra thiết bị thành công (`await websocket.send_json(meta)`), trước khi bước vào vòng lặp streaming frame nhị phân.
+   - Thêm hằng số module `META_INTERVAL_SECONDS = 2.0`.
+   - Trong vòng lặp chính và trong nhánh timeout của listener (`listener.wait()`), kiểm tra `(cur_version != last_result_version) or (current_time - last_meta_time >= META_INTERVAL_SECONDS)`. Nếu thỏa mãn, truy vấn cấu hình mới nhất từ DB (nhờ `db.rollback()`) và phát tán payload `meta` tới client.
+2. **Phía Frontend (`frontend/src/CameraPanel.tsx` & `frontend/src/KioskView.tsx`):**
+   - Gỡ bỏ hoàn toàn `fallbackConfig` và `useEffect` fetch `GET /devices/{id}/preview` lúc mount hoặc đổi camera.
+   - Dùng trực tiếp dữ liệu từ hook `const preview = meta;`.
+   - Giữ nguyên logic tự động gán session cho camera trong `KioskView.tsx`.
+3. **Phía Kiểm thử (`backend/tests/`):**
+   - `backend/tests/test_camera_latency.py`: cập nhật `test_binary_stream_uses_latest_after_ack` nhận message `meta` ban đầu trước khi nhận frame bytes đầu tiên.
+   - `backend/tests/test_preview.py`: cập nhật `test_camera_websocket_sends_meta_when_result_changes` nhận initial meta; bổ sung test mới `test_camera_websocket_sends_meta_immediately_and_periodically` xác thực: (a) nhận meta ngay sau auth; (b) cập nhật config qua `PUT /api/devices/{id}/config` không có frame AI $\rightarrow$ client nhận được meta có `session_id` mới trong vòng $\le 3$s (monkeypatch chu kỳ 0.2s).
+
+### Danh sách tệp thay đổi
+
+| Tệp tin | Hành động | Nội dung thay đổi |
+|---|---|---|
+| `backend/app/api/websocket.py` | Chỉnh sửa | Gửi meta ngay sau auth; thêm hàm `_maybe_send_meta` và kiểm tra chu kỳ `META_INTERVAL_SECONDS = 2.0` ở đầu vòng lặp và nhánh listener timeout. |
+| `backend/tests/test_camera_latency.py` | Chỉnh sửa | Bổ sung `socket.receive_json()` nhận initial meta trước `socket.receive_bytes()`. |
+| `backend/tests/test_preview.py` | Chỉnh sửa | Nhận initial meta trong test cũ; thêm test `test_camera_websocket_sends_meta_immediately_and_periodically`. |
+| `frontend/src/CameraPanel.tsx` | Chỉnh sửa | Gỡ bỏ `fallbackConfig` và `useEffect` fetch `/preview`, đặt `const preview = meta;`, dọn dẹp import. |
+| `frontend/src/KioskView.tsx` | Chỉnh sửa | Gỡ bỏ `fallbackConfig` và `useEffect` fetch `/preview`, đặt `const preview = meta;`. |
+| `docs/thay_doi.md` | Chỉnh sửa | Ghi nhận chi tiết thay đổi và kiểm thử cho Rework T08. |
+
+### Kết quả kiểm thử tự động & Build
+
+- Kiểm thử Frontend: `npm run build` $\rightarrow$ **Thành công 100% (0 lỗi TypeScript, 35 modules transformed trong 1.35s)**.
+- Kiểm thử Backend: `PYTHONPATH=backend pytest backend/tests -q` $\rightarrow$ **81 passed, 3 warnings in 20.07s** (toàn bộ 81 bài test trong hệ thống đều PASS).
+
+
 
 
 
