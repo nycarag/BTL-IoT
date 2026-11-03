@@ -38,7 +38,7 @@ Giảng viên dùng bearer HMAC có hạn 8 giờ; secret là ADMIN_PASSWORD, th
 
 Đăng ký khuôn mặt là thao tác giảng viên có consent; cần kiểm tra trực tiếp đúng người. Đúng một mặt và embedding hữu hạn; lưu embedding, không lưu bytes ảnh. Có endpoint thu hồi embedding mà không xóa lịch sử. Không nạp ảnh theo filename từ `data/faces` nữa.
 
-Pipeline dùng cùng bbox đã qua ROI cho PAD và recognition, không tự phát hiện lại một người khác. Active liveness (phát hiện chớp mắt qua EAR bằng dlib 68 landmarks) xử lý bất đồng bộ không chặn luồng preview (tối đa 10 Hz) với adaptive baseline trung vị. Khi cổng AI nhận diện, backend kiểm tra đã có chớp mắt hợp lệ trong cửa sổ thời gian gần nhất (mặc định 5s) và cùng vị trí khuôn mặt; sau khi ghi nhận điểm danh thành công thì chớp mắt được tiêu thụ (consume) để chống replay. PAD chỉ được chấp nhận khi model nạp, output đúng 1×3/hữu hạn, class thật đạt threshold và calibrated. Recognition cần dependency, calibrated và embedding trong lớp; best match vượt threshold hoặc gần second-best bị từ chối.
+Pipeline dùng cùng bbox đã qua ROI cho PAD và recognition, không tự phát hiện lại một người khác. Active liveness (phát hiện chớp mắt qua EAR bằng dlib 68 landmarks) xử lý bất đồng bộ không chặn luồng preview (tối đa 10 Hz) với adaptive baseline trung vị. Khi cổng AI nhận diện, backend kiểm tra đã có chớp mắt hợp lệ trong cửa sổ thời gian gần nhất (mặc định 5s) và cùng vị trí khuôn mặt; sau khi ghi nhận điểm danh thành công thì chớp mắt được tiêu thụ (consume) để không dùng lại cho các frame kế tiếp. Lưu ý: cơ chế chớp mắt chỉ chống ảnh tĩnh/ảnh in; video quay sẵn có cảnh chớp mắt phát lại trên màn hình vẫn qua được lớp này và việc ngăn chặn hoàn toàn phụ thuộc vào mô hình PAD phát hiện màn hình. PAD chỉ được chấp nhận khi model nạp, output đúng 1×3/hữu hạn, class thật đạt threshold và calibrated. Recognition cần dependency, calibrated và embedding trong lớp; best match vượt threshold hoặc gần second-best bị từ chối.
 
 Stability chỉ là liên tục hình học theo IoU và khoảng cách thời gian, không chứng minh cùng danh tính hoặc hướng đi. Một người ngoài ROI không được chọn; nhiều người trong ROI bị reject. Thay camera/độ phân giải/góc lắp phải hiệu chỉnh lại.
 
@@ -53,3 +53,11 @@ Image inference chạy threadpool để không giữ event loop, mỗi device ch
 Backend UID 10001, frontend unprivileged, filesystem read-only + tmpfs. SQLite/embedding ở volume; model mount read-only. Không nhúng secrets/biometric vào image. Xem docker.md để build và backup.
 
 Phần mềm không có đánh giá thực tế đủ để khẳng định chống giả mạo ảnh in/replay, FAR/FRR hoặc latency ESP32. Mặc định calibrated=false. Thiếu/lỗi AI không được ghi tự động; dùng xác minh trực tiếp thủ công có audit và nhãn riêng. SQLite/embedding hiện không mã hóa tại ứng dụng, phải bảo vệ ổ đĩa và backup.
+
+## Giới hạn đã biết
+
+1. **Active Liveness (Phát hiện chớp mắt qua EAR):**
+   - **Chỉ ngăn chặn ảnh tĩnh và ảnh in** (photo attack) không có chuyển động mắt.
+   - **Không ngăn chặn được video replay có cảnh chớp mắt**: Nếu kẻ tấn công phát video quay sẵn người thật đang chớp mắt trên màn hình điện thoại/máy tính bảng, thuật toán EAR vẫn tính toán và ghi nhận chớp mắt thành công.
+   - **Phát hiện màn hình phụ thuộc vào PAD MiniFASNet**: Mô hình PAD đơn lẻ chưa đủ tin cậy trước màn hình chất lượng cao hoặc vân moiré mờ (thực nghiệm Task T06 cho thấy ảnh moiré giả lập vẫn đạt 0.8746 so với ngưỡng pass 0.45). Video replay chỉ bị chặn nếu PAD bắt được texture màn hình.
+   - **Chưa kiểm chứng chớp mắt trên camera phần cứng thực tế**: Ngưỡng nhắm mắt thích ứng mới chỉ đo nghiệm offline baseline mắt mở trên ảnh tĩnh (`obama.jpg` = 0.2277). Khi demo nếu gặp hiện tượng từ chối oan do camera góc nghiêng, khoảng cách xa hoặc FPS preview thấp, có thể tạm tắt bằng `LIVENESS_MODE=off` hoặc căn chỉnh `LIVENESS_CLOSED_RATIO`.
