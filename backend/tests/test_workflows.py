@@ -124,12 +124,13 @@ class EvaluationTests(unittest.TestCase):
         adapter.session = Mock()
         adapter.input_name, adapter.output_name, adapter.reason = "input", "output", "test"
         adapter.session.run.return_value = [np.array([[0., 10., 0.]])]
+        dummy_frame = np.zeros((80, 80, 3), dtype=np.uint8)
         with patch("app.services.antispoof.settings") as settings, patch("app.services.antispoof.prepare_face"):
             settings.pad_calibrated = True
             settings.pad_real_threshold = .9
-            self.assertTrue(adapter.evaluate(b"x", (1, 1, 10, 10)).is_real)
+            self.assertTrue(adapter.evaluate(dummy_frame, (1, 1, 10, 10)).is_real)
             settings.pad_calibrated = False
-            self.assertFalse(adapter.evaluate(b"x", (1, 1, 10, 10)).is_real)
+            self.assertFalse(adapter.evaluate(dummy_frame, (1, 1, 10, 10)).is_real)
             settings.pad_calibrated = True
             adapter.session.run.return_value = [np.array([[10., 0., 0.]])]
-            self.assertFalse(adapter.evaluate(b"x", (1, 1, 10, 10)).is_real)
+            self.assertFalse(adapter.evaluate(dummy_frame, (1, 1, 10, 10)).is_real)

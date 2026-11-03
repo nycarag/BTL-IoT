@@ -17,17 +17,16 @@ from app.services.reporting import attendance_csv
 class PipelineTests(unittest.TestCase):
     def test_preprocessing_is_bgr_unnormalized(self):
         image = np.full((160, 160, 3), (10, 50, 200), dtype=np.uint8)
-        _, data = cv2.imencode(".png", image)
-        tensor = prepare_face(data.tobytes(), (40, 40, 80, 80))
+        tensor = prepare_face(image, (40, 40, 80, 80))
         self.assertEqual(tensor.shape, (1, 3, 80, 80))
         self.assertEqual(tensor.dtype, np.float32)
         self.assertEqual(float(tensor[0, 0, 0, 0]), 10)
         self.assertEqual(float(tensor[0, 2, 0, 0]), 200)
 
     def test_invalid_face_box(self):
-        _, data = cv2.imencode(".png", np.zeros((80, 80, 3), dtype=np.uint8))
+        frame = np.zeros((80, 80, 3), dtype=np.uint8)
         with self.assertRaises(ValueError):
-            prepare_face(data.tobytes(), (0, 0, 0, 10))
+            prepare_face(frame, (0, 0, 0, 10))
 
     def test_stability_resets_on_motion_and_gap(self):
         gate = StabilityGate()
@@ -46,13 +45,14 @@ class PipelineTests(unittest.TestCase):
         adapter = AntiSpoofAdapter.__new__(AntiSpoofAdapter)
         adapter.session = None
         adapter.reason = "missing"
-        self.assertFalse(adapter.evaluate(b"x", (1, 1, 1, 1)).is_real)
+        dummy = np.zeros((80, 80, 3), dtype=np.uint8)
+        self.assertFalse(adapter.evaluate(dummy, (1, 1, 1, 1)).is_real)
         from unittest.mock import Mock
         adapter.session = Mock()
         adapter.input_name, adapter.output_name = "input", "output"
         adapter.session.run.return_value = [np.array([[np.nan, 0, 0]])]
         with patch("app.services.antispoof.prepare_face", return_value=np.zeros((1, 3, 80, 80), np.float32)):
-            self.assertEqual(adapter.evaluate(b"x", (1, 1, 1, 1)).reason, "invalid PAD output")
+            self.assertEqual(adapter.evaluate(dummy, (1, 1, 1, 1)).reason, "invalid PAD output")
 
     def test_match_empty_and_invalid_probe(self):
         valid_probe = np.zeros(128, dtype=np.float64)
@@ -176,14 +176,6 @@ class PipelineTests(unittest.TestCase):
         res_ambiguous = match(probe, [(ref_sv1, stu1), (ref_sv2, stu2)], threshold=0.50, margin=0.05)
         self.assertIsNone(res_ambiguous)
 
-    def test_prepare_face_accepts_ndarray(self):
-        frame = np.full((160, 160, 3), (10, 50, 200), dtype=np.uint8)
-        tensor = prepare_face(frame, (40, 40, 80, 80))
-        self.assertEqual(tensor.shape, (1, 3, 80, 80))
-        self.assertEqual(tensor.dtype, np.float32)
-        self.assertEqual(float(tensor[0, 0, 0, 0]), 10)
-        self.assertEqual(float(tensor[0, 2, 0, 0]), 200)
-
     def test_detector_accepts_ndarray(self):
         from app.services.face_detector import FaceDetector
         detector = FaceDetector()
@@ -193,10 +185,8 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(reason, "no face detected")
 
     def test_decode_image_and_dimension_validation(self):
-        from app.services.images import decode_image, validate_frame
+        from app.services.images import decode_image
         tiny = np.zeros((32, 32, 3), dtype=np.uint8)
-        with self.assertRaises(ValueError):
-            validate_frame(tiny)
         _, tiny_png = cv2.imencode(".png", tiny)
         with self.assertRaises(ValueError):
             decode_image(tiny_png.tobytes())
@@ -205,6 +195,33 @@ class PipelineTests(unittest.TestCase):
         _, valid_png = cv2.imencode(".png", valid)
         decoded = decode_image(valid_png.tobytes())
         self.assertEqual(decoded.shape, (80, 80, 3))
+
+    def test_decode_image_rejects_oversized_header_without_calling_imdecode(self):
+        import io
+        from PIL import Image
+        from app.services.images import decode_image
+
+        buf = io.BytesIO()
+        Image.new("RGB", (5000, 5000), color="white").save(buf, format="PNG")
+        oversized = buf.getvalue()
+
+        with patch("cv2.imdecode", side_effect=AssertionError("cv2.imdecode must not be called")):
+            with self.assertRaises(ValueError) as ctx:
+                decode_image(oversized)
+            self.assertIn("at most 4 megapixels", str(ctx.exception))
+
+    def test_decode_image_rejects_gif_format(self):
+        import io
+        from PIL import Image
+        from app.services.images import decode_image
+
+        buf = io.BytesIO()
+        Image.new("RGB", (80, 80), color="white").save(buf, format="GIF")
+        gif_bytes = buf.getvalue()
+
+        with self.assertRaises(ValueError) as ctx:
+            decode_image(gif_bytes)
+        self.assertIn("Only JPEG and PNG images are accepted", str(ctx.exception))
 
 
 if __name__ == "__main__":

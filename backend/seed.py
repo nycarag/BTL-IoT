@@ -10,6 +10,9 @@ from pathlib import Path
 import numpy as np
 from sqlalchemy import select
 
+import cv2
+from app.services.images import decode_image
+
 from app.core.domain import validate_roster
 from app.database import SessionLocal, init_db
 from app.models import ClassRoom, Student, AttendanceSession, Device
@@ -125,8 +128,9 @@ def main() -> None:
                 if not code:
                     continue
                 try:
-                    img = face_recognition.load_image_file(str(img_file))
-                    encs = face_recognition.face_encodings(img)
+                    frame = decode_image(img_file.read_bytes())
+                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    encs = face_recognition.face_encodings(rgb)
                     if encs:
                         student_encodings.setdefault(code, []).append(encs[0])
                 except Exception as e:

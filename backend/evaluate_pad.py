@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 from app.services.antispoof import AntiSpoofAdapter
-from app.services.images import validate_image
+from app.services.images import decode_image
 from app.core.config import settings
 
 
@@ -59,9 +59,9 @@ def main():
                 if path.stat().st_size > 5 * 1024 * 1024:
                     raise ValueError("Image larger than 5 MiB")
                 body = path.read_bytes()
-                validate_image(body)
+                frame = decode_image(body)
                 box = tuple(int(entry[key]) for key in ("x", "y", "w", "h"))
-                result = adapter.evaluate(body, box)
+                result = adapter.evaluate(frame, box)
                 if result.score is None or not math.isfinite(result.score):
                     raise ValueError(result.reason)
                 row["real_score"] = result.score

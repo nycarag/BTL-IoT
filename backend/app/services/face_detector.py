@@ -26,16 +26,8 @@ class FaceDetector:
         cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
         self.cascade = cv2.CascadeClassifier(cascade_path)
 
-    def detect_largest(self, frame: np.ndarray | bytes, roi=(0.22, 0.15, 0.78, 0.85)) -> tuple[FaceDetection | None, str]:
-        if isinstance(frame, bytes):
-            if not frame:
-                return None, "empty image"
-            from app.services.images import decode_image
-            try:
-                frame = decode_image(frame)
-            except ValueError:
-                return None, "invalid image"
-        elif frame is None or not isinstance(frame, np.ndarray) or frame.ndim != 3:
+    def detect_largest(self, frame: np.ndarray, roi=(0.22, 0.15, 0.78, 0.85)) -> tuple[FaceDetection | None, str]:
+        if frame is None or not isinstance(frame, np.ndarray) or frame.ndim != 3:
             return None, "invalid image"
 
         height, width = frame.shape[:2]

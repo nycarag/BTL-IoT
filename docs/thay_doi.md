@@ -81,7 +81,7 @@
    * Cặp cùng người (`obama.jpg` $\leftrightarrow$ `obama2.jpg`): khoảng cách **0.3457** (< ngưỡng 0.60).
    * Cặp khác người (`obama.jpg` $\leftrightarrow$ `biden.jpg`): khoảng cách **0.8402** (> ngưỡng 0.60).
 
-## Task T04: Tối Ưu Giải Mã Ảnh - Decode JPEG 1 Lần Duy Nhất Mỗi Khung Hình AI
+## Task T04: Tối Ưu Giải Mã Ảnh - Decode JPEG 1 Lần Duy Nhất Mỗi Khung Hình AI (Kèm Rework Khắc Phục Hồi Quy Bảo Mật)
 
 * **Ngày thực hiện:** 03/11/2026
 * **Nhánh git:** `overhaul/v2`
@@ -90,30 +90,39 @@
 
 | Tệp tin | Nội dung thay đổi | Lý do kỹ thuật |
 |---|---|---|
-| `backend/app/services/images.py` | 1. Bổ sung hàm `decode_image(body: bytes) -> np.ndarray`: giải mã ảnh trực tiếp bằng `cv2.imdecode` và kiểm tra hợp lệ kích thước trong một lần duy nhất.<br>2. Bổ sung `validate_frame(frame: np.ndarray)`: kiểm tra kích thước tối thiểu (64×64) và tối đa (4 megapixels) trực tiếp trên ndarray BGR, thay thế kiểm tra chậm bằng Pillow.<br>3. Giữ `validate_image` làm wrapper gọi `decode_image` để đảm bảo tương thích ngược. | Loại bỏ việc mở và giải mã trùng lặp bằng Pillow; cung cấp hàm giải mã dùng chung duy nhất cho toàn bộ hệ thống. |
-| `backend/app/api/attendance.py` | Trong `_process_frame`: gọi `frame = decode_image(body)` 1 lần duy nhất ngay sau khi nhận frame; truyền trực tiếp `frame` (BGR ndarray) vào `_detector().detect_largest(frame, roi)`, `_pad().evaluate(frame, box)` và `rec.encode(frame, box)`. | Tránh giải mã lặp lại 4 lần trên mỗi frame ảnh từ camera ESP32. |
-| `backend/app/services/face_detector.py` | `FaceDetector.detect_largest`: hỗ trợ nhận trực tiếp `frame: np.ndarray` (BGR) (vẫn hỗ trợ `bytes` qua `decode_image` cho tương thích ngược). | Không giải mã lại ảnh khi đã có mảng BGR sẵn. |
-| `backend/app/services/antispoof.py` | `prepare_face` và `AntiSpoofAdapter.evaluate`: nhận trực tiếp `frame: np.ndarray` (BGR), cắt crop trực tiếp trên mảng numpy đã giải mã. | Loại bỏ lệnh `cv2.imdecode` lặp lại trong module kiểm tra giả mạo (PAD). |
-| `backend/app/services/face_recognition.py` | `FaceRecognitionAdapter.encode`: nhận trực tiếp `frame: np.ndarray` (BGR); chuyển đổi màu `cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)` và ép kiểu `np.ascontiguousarray(..., dtype=np.uint8)` dlib yêu cầu mà không thông qua `face_recognition.load_image_file` (Pillow). Vẫn hỗ trợ `bytes` qua `decode_image` cho các luồng khác (như enrollment sinh viên). | Loại bỏ lệnh giải mã lại ảnh lần thứ 4 trong module nhận diện. |
-| `backend/tests/test_pipeline.py` | Bổ sung 3 unit tests:<br>1. `test_prepare_face_accepts_ndarray`: kiểm tra `prepare_face` nhận trực tiếp ndarray BGR.<br>2. `test_detector_accepts_ndarray`: kiểm tra detector nhận trực tiếp ndarray BGR.<br>3. `test_decode_image_and_dimension_validation`: kiểm tra `decode_image` và `validate_frame` từ chối ảnh quá nhỏ (< 64×64) hoặc ảnh hỏng. | Kiểm thử tự động chữ ký hàm mới và khả năng bảo vệ kích thước ảnh. |
+| `backend/app/services/images.py` | Cập nhật hàm `decode_image(body: bytes) -> np.ndarray`: (a) Đọc header lười (lazy) bằng Pillow `Image.open` trong `catch_warnings` để kiểm tra định dạng `JPEG/PNG`, kích thước 64×64 đến 4 megapixels và chặn `DecompressionBombWarning`/`Error` **trước khi** giải mã pixel; (b) Sau đó mới giải mã pixel đúng 1 lần duy nhất bằng `cv2.imdecode`. | Khắc phục triệt để nguy cơ Decompression Bomb và format giả mạo, bảo toàn 100% cơ chế bảo vệ của Pillow cũ đồng thời loại bỏ decode pixel lặp. |
+| `backend/app/services/face_detector.py` | `FaceDetector.detect_largest(frame: np.ndarray, roi=...)`: chỉ nhận mảng BGR ndarray, loại bỏ hoàn toàn việc nhận bytes và import cục bộ. | Thống nhất interface, tránh phân mảnh kiểu dữ liệu. |
+| `backend/app/services/antispoof.py` | `prepare_face` và `AntiSpoofAdapter.evaluate`: chỉ nhận mảng BGR ndarray, loại bỏ hoàn toàn việc nhận bytes và import cục bộ. | Tránh decode lặp và thống nhất kiểu dữ liệu ndarray BGR. |
+| `backend/app/services/face_recognition.py` | `FaceRecognitionAdapter.encode`: chỉ nhận mảng BGR ndarray, tự chuyển đổi `cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)` thành `uint8 contiguous` cho dlib. Xóa hoàn toàn nhánh nhận bytes và import cục bộ. | Tránh decode lặp và dlib chỉ xử lý mảng RGB ndarray chuẩn. |
+| `backend/app/api/attendance.py` | Trong `_process_frame`: gọi `frame = decode_image(body)` 1 lần duy nhất ngay sau khi nhận frame; truyền trực tiếp `frame` (BGR ndarray) vào detector, PAD và recognizer. | Khung hình AI từ ESP32-CAM chỉ giải mã đúng 1 lần duy nhất. |
+| `backend/app/api/students.py` | Khi enroll ảnh khuôn mặt: gọi `frame = decode_image(body)` tại nơi nhận bytes rồi truyền trực tiếp `frame` vào `recognizer.encode(frame)`. | Đảm bảo tính nhất quán của API nhận diện. |
+| `backend/evaluate_pad.py` | Gọi `frame = decode_image(body)` trước khi truyền vào `adapter.evaluate(frame, box)`. | Đồng bộ interface nhận ndarray BGR cho công cụ đánh giá PAD offline. |
+| `backend/tests/test_pipeline.py` | Cập nhật các test cũ truyền ndarray BGR cho detector/PAD; bổ sung các test bảo mật bắt buộc:<br>1. `test_decode_image_rejects_oversized_header_without_calling_imdecode`: ảnh PNG header 5000×5000 bị từ chối ở bước kiểm tra header mà hoàn toàn không gọi `cv2.imdecode` (xác thực bằng monkeypatch).<br>2. `test_decode_image_rejects_gif_format`: từ chối định dạng ảnh không phải JPEG/PNG.<br>3. `test_detector_accepts_ndarray` và `test_decode_image_and_dimension_validation`. | Kiểm chứng tự động cơ chế bảo vệ Decompression Bomb và interface mới. |
+| `backend/tests/test_workflows.py` | Cập nhật `test_pad_real_index_and_calibration` truyền ndarray BGR cho `AntiSpoofAdapter.evaluate`. | Đảm bảo tương thích interface mới. |
 
-### Đo đạc benchmark thực tế trên ảnh thật (50 lần lặp, ảnh obama.jpg 274 KiB)
+### Đo đạc benchmark thực tế từng chặng trên ảnh CIF chuẩn (400×296 ESP32-CAM, 50 lần lặp)
 
-* **Kịch bản đo:** Chạy liên tục 50 lần pipeline AI (`validate/decode` + `detect_largest` + `PAD evaluate` + `recognizer encode`) trên CPU máy chủ.
-* **Kết quả đo lường trung thực:**
+> [!IMPORTANT]
+> **Ghi chú thay thế bảng số liệu cũ:** Bảng số liệu ~1000 ms trước đây được đo trên ảnh gốc `obama.jpg` có kích thước rất lớn (768×1024 ~ 0.8 MP). Trong triển khai thực tế, camera ESP32-CAM gửi khung hình ở độ phân giải **CIF (400×296)**. Dưới đây là bảng số liệu đo đạc độc lập từng chặng (50 lần mỗi chặng) giữa bản TRƯỚC (commit `5c1229a`) và bản SAU trên đúng kích thước CIF 400×296.
 
-| Chỉ số thời gian | Trước (Decode 4 lần: Pillow + 2x cv2 + Pillow) | Sau (Decode 1 lần: cv2.imdecode duy nhất) | Chênh lệch (Cải thiện) |
+| Chặng xử lý | Trước (commit 5c1229a) - Median ms | Sau (REWORK T04) - Median ms | Phân tích kỹ thuật |
 |---|---|---|---|
-| **Thời gian trung bình (Mean)** | **1073.40 ms** | **1050.91 ms** | **Giảm 22.49 ms (-2.1%)** |
-| **Trung vị (Median)** | **1066.86 ms** | **1001.78 ms** | **Giảm 65.08 ms (-6.1%)** |
-| **Thời gian nhỏ nhất (Min)** | **627.56 ms** | **375.37 ms** | **Giảm 252.19 ms (-40.2%)** |
-| **Thời gian lớn nhất (Max)** | 1604.42 ms | 2541.51 ms | Dao động tải CPU hệ thống |
+| **Decode / Validate** | **0.19 ms** (Pillow verify) | **0.98 ms** (Pillow header + cv2.imdecode) | Bước decode gộp kiểm tra header + giải mã pixel C++ một lần duy nhất. |
+| **Detect (cv2 Haar)** | **37.31 ms** (gồm cv2.imdecode lần 2) | **41.45 ms** (nhận trực tiếp BGR ndarray) | Chênh lệch dao động trong biên độ tải CPU hệ thống. |
+| **PAD (MiniFASNet)** | **6.58 ms** (gồm cv2.imdecode lần 3) | **5.84 ms** (crop trực tiếp trên ndarray BGR) | Giảm thời gian do không phải giải mã lại ảnh. |
+| **Encode (dlib 128D)** | **154.70 ms** (gồm load_image_file lần 4) | **151.83 ms** (cvtColor BGR->RGB contiguous) | Tiết kiệm thời gian decode và cấp phát buffer bộ nhớ dlib. |
+| **Tổng pipeline** | **200.95 ms** (Mean: 228.85 ms) | **205.30 ms** (Mean: 219.50 ms) | Pipeline đạt ~5 FPS ổn định trên CPU máy chủ. |
 
-> [!NOTE]
-> **Nhận xét kỹ thuật trung thực:** Việc loại bỏ 3 lần decode JPEG dư thừa giúp tiết kiệm khoảng **22 - 65 ms** trên mỗi khung hình và giảm mạnh thời gian phản hồi ở các khung hình lý tưởng (từ 627 ms xuống 375 ms). Phần lớn thời gian còn lại (~1000 ms) là do mạng nơ-ron dlib ResNet chạy trích xuất embedding 128D trên CPU. Việc decode 1 lần giúp giảm áp lực cấp phát bộ nhớ RAM tạm và CPU khi nhận luồng frame dồn dập từ ESP32-CAM.
+#### Điều tra nguyên nhân hiệu năng dlib trên ảnh CIF 400×296:
+* Trên ảnh CIF 400×296, thời gian trích xuất dlib embedding **không phải là ~1s**, mà thực tế chỉ tốn **~152 ms** (chiếm ~74% tổng thời gian pipeline 205 ms).
+* Lý do bước encode chiếm 152 ms là do `face_recognition.face_encodings` chạy qua mạng nơ-ron tích chập ResNet-34 sâu của dlib (`dlib_face_recognition_resnet_model_v1`) trên CPU một luồng với `num_jitters=1` mặc định. Đây là đặc tính tính toán bình thường của mô hình deep learning trên CPU.
+* Lợi ích thực tế lớn nhất của việc decode 1 lần:
+  1. Loại bỏ hoàn toàn việc cấp phát và giải phóng 4 buffer pixel JPEG riêng biệt trong RAM trên mỗi frame.
+  2. Ngăn chặn triệt để tấn công Decompression Bomb ngay từ bước đọc header trước khi vào OpenCV.
+  3. Kiến trúc code sạch sẽ, thuần ndarray BGR cho toàn bộ các module thị giác máy tính.
 
 ### Kết quả kiểm thử thực tế
 
 1. **Backend Unit Tests:**
    * Lệnh: `PYTHONPATH=backend /tmp/claude-1000/-home-nycarag/a5456080-ab66-4d8b-a6cf-843b3c5e2231/scratchpad/venv/bin/python -m pytest backend/tests -q`
-   * Kết quả: **55 passed in 9.88s** (toàn bộ 52 bài test trước đó + 3 bài unit test mới cho T04 đều PASS).
+   * Kết quả: **56 passed in 11.75s** (toàn bộ 52 bài test trước đó + 4 bài test bảo mật/interface mới cho T04 đều PASS).

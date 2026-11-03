@@ -91,13 +91,10 @@ class FaceRecognitionAdapter:
     def ready(self):
         return self.engine is not None and settings.recognition_calibrated
 
-    def encode(self, frame: np.ndarray | bytes, box=None):
+    def encode(self, frame: np.ndarray, box=None):
         if self.engine is None:
             raise ValueError(self.reason)
-        if isinstance(frame, bytes):
-            from app.services.images import decode_image
-            frame = decode_image(frame)
-        elif not isinstance(frame, np.ndarray) or frame.ndim != 3:
+        if frame is None or not isinstance(frame, np.ndarray) or frame.ndim != 3:
             raise ValueError("Invalid image")
 
         rgb_image = np.ascontiguousarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), dtype=np.uint8)

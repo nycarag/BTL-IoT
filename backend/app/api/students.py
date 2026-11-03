@@ -11,7 +11,7 @@ from app.models import Attendance, ClassRoom, Student
 from app.models.school import FaceReference, utcnow
 from app.schemas import StudentCreate, StudentResponse
 from app.services.face_recognition import FaceRecognitionAdapter
-from app.services.images import validate_image
+from app.services.images import decode_image
 from starlette.concurrency import run_in_threadpool
 
 router = APIRouter()
@@ -121,8 +121,8 @@ async def enroll_face(
         if len(body) > 5 * 1024 * 1024:
             raise HTTPException(413, f"Ảnh {f.filename or ''} vượt quá dung lượng 5 MiB")
         try:
-            validate_image(body)
-            vec = await run_in_threadpool(recognizer.encode, body)
+            frame = decode_image(body)
+            vec = await run_in_threadpool(recognizer.encode, frame)
             enc_list.append(vec)
         except ValueError as exc:
             raise HTTPException(422, str(exc))

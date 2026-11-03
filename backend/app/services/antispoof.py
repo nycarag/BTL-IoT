@@ -24,17 +24,9 @@ class PadResult:
     score: float | None = None
 
 
-def prepare_face(image: np.ndarray | bytes, box: tuple[int, int, int, int], size=(80, 80), scale=2.7):
-    if isinstance(image, bytes):
-        from app.services.images import decode_image
-        try:
-            frame = decode_image(image)
-        except ValueError:
-            raise ValueError("invalid image")
-    elif image is None or not isinstance(image, np.ndarray) or image.ndim != 3:
+def prepare_face(frame: np.ndarray, box: tuple[int, int, int, int], size=(80, 80), scale=2.7):
+    if frame is None or not isinstance(frame, np.ndarray) or frame.ndim != 3:
         raise ValueError("invalid image")
-    else:
-        frame = image
 
     height, width = frame.shape[:2]
     x, y, w, h = box
@@ -81,13 +73,13 @@ class AntiSpoofAdapter:
     def ready(self):
         return self.session is not None and settings.pad_calibrated and 0.0 < settings.pad_real_threshold < 1.0
 
-    def evaluate(self, image: np.ndarray | bytes, box=None) -> PadResult:
-        if image is None or (isinstance(image, (bytes, bytearray)) and not image) or box is None:
+    def evaluate(self, frame: np.ndarray, box=None) -> PadResult:
+        if frame is None or not isinstance(frame, np.ndarray) or frame.ndim != 3 or box is None:
             return PadResult(False, "valid detected face is required")
         if self.session is None:
             return PadResult(False, self.reason)
         try:
-            tensor = prepare_face(image, box, scale=settings.pad_crop_scale)
+            tensor = prepare_face(frame, box, scale=settings.pad_crop_scale)
             logits = np.asarray(self.session.run([self.output_name], {self.input_name: tensor})[0])
             if logits.shape != (1, 3) or not np.isfinite(logits).all():
                 return PadResult(False, "invalid PAD output")
