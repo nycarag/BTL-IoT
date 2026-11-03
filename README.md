@@ -56,19 +56,23 @@ Hệ thống điểm danh sinh viên tự động theo kiến trúc phân tầng
 
 ## 3. Các Tính Năng Nổi Bật Được Cải Tổ Toàn Diện
 
-1. **Phân tách hoàn toàn Frontend & Backend (Decoupled Client-Server)**:
-   * Loại bỏ kiến trúc Monolithic script cũ.
-   * Backend viết bằng **FastAPI** chia module rõ ràng (`api`, `services`, `models`, `schemas`, `database`), có tài liệu Swagger UI tự động tại `/docs`.
-   * Frontend viết bằng **React 18 + TypeScript + Vite + Tailwind CSS**, hỗ trợ cả chế độ Kiosk toàn màn hình cho sinh viên và Admin Dashboard cho giảng viên.
-2. **Face Anti-Spoofing bằng Deep Learning (MiniFASNetV2 ONNX)**:
-   * Sử dụng mô hình mạng nơ-ron tích chập chuyên dụng phân tích kết cấu vi mô (micro-texture) của khuôn mặt, ngăn chặn hiệu quả tấn công bằng ảnh in (Print Attack) và màn hình điện thoại (Replay Attack).
-3. **Phản hồi âm thanh tức thì từ Loa máy tính (Audio HMI)**:
-   * Do phần cứng chưa lắp còi chíp vật lý, hệ thống kích hoạt cơ chế phát âm thanh còi bíp tần số 1800Hz qua loa máy tính (`backend/app/services/audio_service.py`) kết hợp bộ tổng hợp âm thanh Web Audio API trên trình duyệt.
-4. **Cơ sở dữ liệu khuôn mặt thực tế đã nạp sẵn**:
-   * Tích hợp toàn bộ hồ sơ 36 sinh viên lớp D23CTAT01-B và vector embedding 128 chiều của các thành viên nhóm vào CSDL SQLite.
-5. **Hỗ trợ kết nối Camera linh hoạt**:
-   * Hỗ trợ luồng stream từ bo mạch **ESP32-CAM** qua Wi-Fi.
-   * Hỗ trợ cờ `--webcam` để chạy thử nghiệm trực tiếp bằng **Webcam Laptop** mà không cần cắm bo mạch ESP32.
+1. **Kiến trúc phân tầng Decoupled (FastAPI + React 18 / Vite)**:
+   * Backend viết bằng FastAPI module hóa rõ ràng (`api`, `services`, `models`, `schemas`, `database`), có tài liệu Swagger UI tự động tại `/docs`.
+   * Giao diện React 18 + TypeScript + Vite + Tailwind CSS với hai chế độ: Kiosk toàn màn hình cho sinh viên và Dashboard quản trị cho giảng viên.
+2. **Bộ phát hiện khuôn mặt kép (YuNet + Haar Fallback)**:
+   * Sử dụng mạng học sâu YuNet (OpenCV Zoo) làm bộ dò chính với độ chính xác cao và khả năng định vị 5 điểm mốc (landmarks), tự động chuyển sang Haar Cascade khi ảnh thiếu sáng hoặc góc nghiêng khó.
+3. **Chống giả mạo Face Anti-Spoofing (MiniFASNetV2 ONNX)**:
+   * Tiền xử lý tensor `(1, 3, 80, 80)` chuẩn Minivision, dịch chuyển vùng cắt (box shift) vào trong biên ảnh thay vì cắt cụt để bảo toàn tỷ lệ khuôn mặt. Nhận diện ảnh in và màn hình qua phân tích kết cấu vi mô với ngưỡng pass `0.45`.
+4. **Active Liveness phát hiện chớp mắt thời gian thực (EAR Blink Gate)**:
+   * Thuật toán Eye Aspect Ratio (EAR) dựa trên dlib 68 landmarks phân tích trực tiếp trên luồng preview 10 Hz. Tự thích ứng ngưỡng nhắm mắt theo đường cơ sở trung vị lịch sử, tiêu thụ dấu vết chớp mắt ngay khi điểm danh thành công để chống dùng lại.
+5. **Nhận diện khuôn mặt dlib ResNet-34 đa mẫu (128D Raw Vectors)**:
+   * Hỗ trợ đăng ký từ 1 đến 5 ảnh chân dung. Lưu trữ vector 128 chiều dạng thô nguyên bản (không chuẩn hóa L2 sớm) và so khớp khoảng cách Euclid đa mẫu vector hóa với ngưỡng `0.52` và khoảng cách an toàn `0.05`.
+6. **Đồng bộ Video & Metadata Canvas mượt mà**:
+   * Luồng WebSocket (`/ws/devices/{id}/camera`) phát metadata JSON và khung hình JPEG nhị phân theo nhịp ACK `"next"`. Trình duyệt vẽ khung bounding box trực tiếp trên Canvas HTML5 theo tỷ lệ contain chuẩn, không vẽ đè lên ảnh ở máy chủ.
+7. **Điều khiển Cầu nối Camera từ Web & Chống SSRF**:
+   * Quản lý tiến trình nền `camera_bridge.py` trực tiếp từ giao diện bảng điều khiển, hỗ trợ chuyển đổi nhanh giữa Webcam laptop và ESP32-CAM. Hàm kiểm thực URL chỉ cho phép kết nối tới IP private LAN hoặc loopback, chặn đứng nguy cơ tấn công SSRF vào mạng nội bộ.
+8. **Phản hồi âm thanh còi bíp HMI**:
+   * Tự động phát âm báo còi bíp tần số 1800Hz qua loa máy tính (`audio_service.py`) kết hợp Web Audio API trên trình duyệt ngay khi sinh viên điểm danh thành công.
 
 ---
 
@@ -117,10 +121,16 @@ IOT/
 
 ### Cách 1: Khởi chạy 1-Click nhanh nhất (Khuyên dùng)
 
-1. **Bước 1: Cài đặt thư viện phụ thuộc (nếu chưa có)**
+1. **Bước 1: Chuẩn bị môi trường & file cấu hình `.env`**
+   Cài đặt thư viện phụ thuộc:
    ```bash
    pip install fastapi uvicorn sqlalchemy pydantic opencv-python onnxruntime face_recognition Pillow python-dotenv python-multipart
    ```
+   Tạo file `.env` từ mẫu:
+   ```bash
+   cp backend/.env.example .env
+   ```
+   Mở `.env` và thiết lập `ADMIN_PASSWORD`, `DEVICE_TOKEN`, và `SECRET_KEY` (chuỗi ngẫu nhiên tối thiểu 32 ký tự).
 
 2. **Bước 2: Chạy hệ thống 1-click**
    ```bash
@@ -130,13 +140,13 @@ IOT/
 
 3. **Bước 3: Mở trình duyệt và đăng nhập**
    * Truy cập: **`http://localhost:8000`**
-   * Tài khoản quản trị: **`admin`** / Mật khẩu: **`admin123456`**
-   * Giao diện sẽ tự động mở tab **🖥️ Kiosk Điểm Danh**.
+   * Tài khoản quản trị: **`admin`** / Mật khẩu: mật khẩu đã đặt trong `.env` (mặc định `admin123456`)
+   * Giao diện sẽ tự động mở tab **Kiosk Điểm Danh**.
 
 4. **Bước 4: Kết nối luồng Camera**
    * **Bật/tắt camera trực tiếp từ Web UI (Khuyên dùng)**:
-     - Bạn không cần mở terminal thứ hai: vào tab **Thiết bị & vùng điểm danh** trên dashboard, nhấn nút **Bật camera laptop** hoặc **Bật ESP32-CAM** (kèm URL snapshot).
-     - Backend tự động quản lý tiến trình nền an toàn (chống SSRF, tự ngắt khi tắt server) và hiển thị trực tiếp PID cùng nhật ký lỗi gần nhất.
+     - Không cần mở terminal thứ hai: vào tab **Thiết bị & vùng điểm danh** trên dashboard, nhấn nút **Bật camera laptop** hoặc **Bật ESP32-CAM** (nhập URL snapshot cổng 80).
+     - Backend tự động quản lý tiến trình nền an toàn qua `BridgeControl` (chống SSRF, tự ngắt khi tắt server) và hiển thị trực tiếp PID cùng nhật ký lỗi gần nhất.
    * **Hoặc chạy bằng terminal/kịch bản shell riêng**:
      - *Dùng Webcam máy tính để test nhanh*:
        ```bash
@@ -157,12 +167,35 @@ docker compose up --build -d
 
 ---
 
-## 6. Kiểm Thử Hệ Thống (Unit Tests)
+## 6. Lưu Ý Khi Nâng Cấp Từ Bản Cũ
 
-Dự án bao gồm bộ 41 bài kiểm thử tự động bao phủ toàn bộ luồng nghiệp vụ API, bộ lọc ROI, phát hiện giả mạo và độ trễ buffer:
+1. **Phải đăng ký lại khuôn mặt sinh viên:**
+   Bản cũ lưu trữ vector đã bị chuẩn hóa sớm theo chuẩn L2 (độ dài vector = 1.0). Thuật toán mới so khớp đa mẫu trên vector thô 128D nguyên bản của dlib để bảo toàn độ chính xác không gian đặc trưng. Dữ liệu cũ vẫn nạp được nhưng sẽ kích hoạt cảnh báo log và có thể gây sai lệch ngưỡng nhận diện.
+2. **Thiết lập `SECRET_KEY` cố định trong file `.env`:**
+   Nếu biến này bị bỏ trống, máy chủ sẽ tự sinh ngẫu nhiên một khóa tạm thời trong RAM. Điều này khiến toàn bộ JWT token của giảng viên bị vô hiệu hóa mỗi khi máy chủ khởi động lại.
+3. **Nạp lại firmware cho bo mạch ESP32-CAM:**
+   Firmware mới tách cổng độc lập theo chuẩn CameraWebServer: cổng 80 phục vụ cấu hình `/status` và chụp ảnh `/capture`, cổng 81 phục vụ stream MJPEG `/stream`. Cần nạp lại mã nguồn trong thư mục `firmware/esp32_cam_softap/`.
+4. **Tùy chọn `LIVENESS_MODE=off` khi demo hoặc kiểm thử:**
+   Thuật toán phát hiện chớp mắt (EAR) yêu cầu luồng preview ổn định đạt tối thiểu 10–15 FPS. Nếu camera ESP32 bị đặt ở góc nghiêng, khoảng cách xa hoặc đường truyền mạng Wi-Fi bị nghẽn làm tụt khung hình, người vận hành có thể tạm thời tắt cổng chớp mắt bằng cách đặt `LIVENESS_MODE=off` trong `.env`.
+
+---
+
+## 7. Giới Hạn Đã Biết
+
+1. **Không chống được Deepfake và Video Replay chất lượng cao:**
+   Cơ chế active liveness qua cử động mí mắt (EAR) chỉ ngăn chặn hiệu quả ảnh in và ảnh tĩnh. Nếu kẻ tấn công phát video quay sẵn người thật đang chớp mắt trên màn hình chất lượng cao, việc ngăn chặn phụ thuộc hoàn toàn vào mô hình PAD MiniFASNet.
+2. **Chưa đo lường FAR/FRR trên tập dữ liệu lớn:**
+   Hệ thống chưa được thử nghiệm đo tỷ lệ nhận diện sai (FAR) và từ chối sai (FRR) trên tập dữ liệu hàng nghìn sinh viên ngoài thực địa.
+3. **Chưa thử nghiệm trực tiếp trên phần cứng thật sau nâng cấp:**
+   Toàn bộ pipeline AI và cầu nối sau đợt cải tổ mới được kiểm chứng qua bộ 97 bài kiểm thử tự động và kịch bản E2E trên tập ảnh mẫu công khai trong mạng nội bộ, chưa đo kiểm sóng Wi-Fi thực tế của chip ESP32-CAM.
+
+---
+
+## 8. Kiểm Thử Hệ Thống (Automated Tests)
+
+Dự án duy trì bộ **97 bài kiểm thử tự động** (Pytest) bao phủ toàn diện từ phân quyền token, vòng đời tiến trình bridge, phát hiện chớp mắt EAR, chống giả mạo PAD đến đồng bộ WebSocket:
 
 ```bash
-cd backend
-python3 -m unittest discover -s tests -v
+PYTHONPATH=backend pytest backend/tests -q
 ```
-*Kết quả: 41 tests passed 100%.*
+*Kết quả đo nghiệm: 97 passed, 3 warnings (các warnings là DeprecationWarning xuất phát từ thư viện bên thứ ba trên môi trường Python 3.14, mã nguồn ứng dụng đạt chuẩn 100%).*

@@ -48,7 +48,7 @@ Thu thập calibration và held-out test độc lập theo model-evaluation.md. 
 * **Môi trường:** Máy chủ FastAPI chạy qua Uvicorn thật trên cổng 8765, SQLite database độc lập tại thư mục tạm, kết nối mạng HTTP/WebSocket nội bộ (localhost).
 * **Nguồn dữ liệu hình ảnh:** 
   > [!IMPORTANT]
-  > Toàn bộ các ảnh sử dụng trong đợt kiểm thử này là **ảnh công khai** (ảnh chân dung chụp từ web công khai của cựu Tổng thống Barack Obama, Tổng thống Joe Biden, và ảnh mẫu tấn công in màu `image_F1.jpg` từ bộ dữ liệu mở của nhóm Minivision AI). Đợt kiểm thử này **không sử dụng camera phần cứng ESP32-CAM thực tế** mà nạp trực tiếp qua HTTP REST và WebSocket.
+  > Toàn bộ các ảnh sử dụng trong đợt kiểm thử này là **ảnh công khai** (ảnh chân dung chụp từ web công khai của hai cựu Tổng thống Mỹ Barack Obama và Joe Biden, và ảnh mẫu tấn công in màu `image_F1.jpg` từ bộ dữ liệu mở của nhóm Minivision AI). Đợt kiểm thử này **không sử dụng camera phần cứng ESP32-CAM thực tế** mà nạp trực tiếp qua HTTP REST và WebSocket.
 
 ### Bảng kết quả kiểm thử đầu-cuối (E2E)
 

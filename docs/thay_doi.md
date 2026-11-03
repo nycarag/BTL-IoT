@@ -604,6 +604,27 @@ Thực hiện đợt kiểm thử tích hợp đầu-cuối (End-to-End) toàn d
 - Lệnh: `PYTHONPATH=backend pytest backend/tests -q`
 - Kết quả: **97 passed, 3 warnings** (100% test suite vượt qua).
 
+## [2026-11-03] TASK T13: Đồng bộ hóa toàn diện tài liệu kiến trúc, cấu hình Docker và hướng dẫn vận hành
+
+### Bối cảnh & Mục tiêu
+Sau chuỗi nâng cấp toàn diện từ T01 đến T12 (bảo mật CORS/SECRET_KEY, giải mã JPEG 1 lần, bộ phát hiện YuNet + Haar fallback, chống giả mạo MiniFASNet crop 80x80, active liveness EAR phát hiện chớp mắt trên luồng preview, luồng WebSocket streaming kèm metadata canvas, firmware tách cổng 80/81, điều khiển camera bridge chống SSRF và kiểm thử E2E), tài liệu kiến trúc và hướng dẫn triển khai cần được rà soát và cập nhật đồng bộ để phản ánh chính xác 100% hiện trạng mã nguồn.
+
+### Danh mục tệp thay đổi
+
+| Tệp thay đổi | Loại thao tác | Mô tả chi tiết | Mục đích / Tác động |
+|---|---|---|---|
+| `docs/architecture.md` | Chỉnh sửa | 1. Sửa cơ chế ký token: dùng `SECRET_KEY` (thay vì `ADMIN_PASSWORD` cũ).<br>2. Cập nhật sơ đồ ASCII và luồng xử lý: firmware tách cổng 80/81, giải mã JPEG 1 lần duy nhất, bộ dò YuNet + Haar fallback, MiniFASNetV2 chuẩn Minivision 80x80 BGR, liveness chớp mắt EAR 10 Hz, vector dlib 128D dạng thô đa mẫu.<br>3. Bổ sung mục điều khiển Camera Bridge từ Web và bộ lọc an toàn chống SSRF.<br>4. Ghi nhận trung thực các giới hạn đã biết về video replay, FAR/FRR và phần cứng thực tế. | Đảm bảo tài liệu kiến trúc khớp tuyệt đối với mã nguồn hiện tại. |
+| `docker-compose.yml` | Chỉnh sửa | Truyền các biến môi trường mới vào service backend: `SECRET_KEY`, `FACE_DETECTOR`, `PAD_REAL_THRESHOLD: 0.45`, `LIVENESS_MODE`, `LIVENESS_CLOSED_RATIO`, `LIVENESS_WINDOW_S`, `LIVENESS_MAX_HZ`. | Đồng bộ hóa cấu hình container Docker với các tính năng mới của backend. |
+| `docs/docker.md` | Chỉnh sửa | Cập nhật mục biến môi trường yêu cầu `SECRET_KEY`, bổ sung các tham số điều khiển AI và lưu ý khắc phục lỗi API 401 khi restart container. | Hướng dẫn triển khai Docker chính xác. |
+| `README.md` | Chỉnh sửa | 1. Cập nhật mục "Tính năng nổi bật": YuNet, MiniFASNet 80x80, EAR blink, dlib raw embedding đa mẫu, WebSocket canvas render, Web bridge control.<br>2. Cập nhật mục "Chạy nhanh": thiết lập `.env` với `SECRET_KEY`.<br>3. Bổ sung mục "Lưu ý khi nâng cấp từ bản cũ" (4 điểm: đăng ký lại mặt, đặt `SECRET_KEY`, nạp lại firmware cổng 80/81, cờ `LIVENESS_MODE=off`).<br>4. Bổ sung mục "Giới hạn đã biết" ngắn gọn.<br>5. Cập nhật số liệu kiểm thử: 97 bài kiểm thử tự động PASS 100%. | Đảm bảo trang tài liệu chính của dự án phản ánh đúng năng lực và cách vận hành hệ thống. |
+| `docs/test-report.md` | Chỉnh sửa | Chuẩn hóa câu chữ: "hai cựu Tổng thống Mỹ Barack Obama và Joe Biden" tại mục kiểm thử E2E 11/2026. | Đảm bảo tính chuẩn mực và trang trọng của báo cáo kiểm thử. |
+| `docs/thay_doi.md` | Chỉnh sửa | Ghi nhận chi tiết kết quả thực hiện Task T13. | Nhật ký phát triển hệ thống. |
+
+### Kết quả kiểm thử tự động hồi quy
+- Lệnh: `PYTHONPATH=backend pytest backend/tests -q`
+- Kết quả: **97 passed, 3 warnings** (100% test suite đạt chuẩn).
+- Kiểm tra cú pháp Compose: `docker compose config --quiet` $\rightarrow$ **Thành công (mã thoát 0)**.
+
 
 
 
