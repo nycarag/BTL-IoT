@@ -4,10 +4,8 @@ from __future__ import annotations
 import io
 import json
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
-from sqlalchemy import select
 
 from app.core.config import settings
 from app.models.school import FaceReference, Student
@@ -21,7 +19,7 @@ class RecognitionResult:
 
 def match(
     probe: np.ndarray,
-    references: list[Any],
+    rows: list[tuple[FaceReference, Student]],
     threshold: float | None = None,
     margin: float | None = None,
 ) -> RecognitionResult | None:
@@ -30,23 +28,17 @@ def match(
     thresh = settings.recognition_threshold if threshold is None else threshold
     marg = settings.recognition_margin if margin is None else margin
     matches = []
-    for item in references:
-        if isinstance(item, (tuple, list)):
-            reference, student = item
-        else:
-            reference = item
-            student = getattr(item, "student", None)
+    for reference, student in rows:
         try:
             vector = np.asarray(json.loads(reference.embedding), dtype=np.float64)
-        except (ValueError, TypeError, AttributeError):
+        except (ValueError, TypeError):
             continue
         if vector.shape != (128,) or not np.isfinite(vector).all():
             continue
         dist = float(np.linalg.norm(vector - probe))
         if not np.isfinite(dist):
             continue
-        student_code = getattr(student, "student_code", None) or getattr(reference, "student_code", "")
-        matches.append((dist, student_code))
+        matches.append((dist, student.student_code))
     matches.sort(key=lambda m: m[0])
     if not matches or matches[0][0] > thresh:
         return None
@@ -87,13 +79,3 @@ class FaceRecognitionAdapter:
         if len(encodings) != 1 or not np.isfinite(encodings[0]).all():
             raise ValueError("Không thể trích xuất đặc trưng khuôn mặt từ ảnh.")
         return encodings[0]
-
-    def recognize(self, image_bytes: bytes, box, db, class_id: int):
-        if not self.ready:
-            return None
-        probe = self.encode(image_bytes, box)
-        references = db.execute(
-            select(FaceReference, Student).join(Student, Student.id == FaceReference.student_id)
-            .where(Student.class_id == class_id)
-        ).all()
-        return match(probe, references)

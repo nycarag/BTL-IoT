@@ -44,3 +44,14 @@
 1. **Backend Unit Tests:**
    * Lệnh: `PYTHONPATH=backend /tmp/claude-1000/-home-nycarag/a5456080-ab66-4d8b-a6cf-843b3c5e2231/scratchpad/venv/bin/python -m pytest backend/tests -q`
    * Kết quả: **48 passed in 15.88s** (toàn bộ 44 bài test trước đó + 4 bài unit test mới cho T02 đều PASS).
+
+### Rework T02: Xóa Hack Mock Production, Chuẩn Hóa Signature Match và Xóa Method Thừa
+
+* **Ngày thực hiện:** 03/11/2026
+* **Nội dung thay đổi:**
+  * `backend/app/api/attendance.py`: Xóa bỏ hoàn toàn `from unittest.mock import Mock` và nhánh rẽ kiểm tra mock trong code production; pipeline điểm danh chỉ còn duy nhất 1 luồng chuẩn: `probe = await run_in_threadpool(rec.encode, body, detection.box)` -> truy vấn `rows` trong DB trên luồng request -> gọi hàm thuần `match(probe, rows)`.
+  * `backend/app/services/face_recognition.py`: Rút gọn chữ ký `match(probe, rows: list[tuple[FaceReference, Student]], threshold=None, margin=None)`, bỏ duck-typing thừa; xóa bỏ hoàn toàn method không còn sử dụng `FaceRecognitionAdapter.recognize()`.
+  * `backend/tests/test_api.py`: Chuyển đổi test kiểm thử điểm danh từ mock `recognize` sang mock `rec.encode` trả về vector 128 chiều + tạo bản ghi `FaceReference` hợp lệ 128 chiều trong DB test, kiểm tra hành vi thực tế 100% của toàn bộ pipeline.
+* **Kết quả kiểm thử thực tế:**
+  * Lệnh: `PYTHONPATH=backend /tmp/claude-1000/-home-nycarag/a5456080-ab66-4d8b-a6cf-843b3c5e2231/scratchpad/venv/bin/python -m pytest backend/tests -q`
+  * Kết quả: **48 passed in 12.77s**.

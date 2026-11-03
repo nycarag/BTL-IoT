@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import time
 from functools import lru_cache
-from unittest.mock import Mock
 
 from starlette.concurrency import run_in_threadpool
 
@@ -142,15 +141,13 @@ async def _process_frame(device_id, image, session_id, db):
         rec = _recognizer()
         if not getattr(rec, "ready", False):
             recognition = None
-        elif isinstance(getattr(rec, "recognize", None), Mock):
-            recognition = rec.recognize(body, detection.box, db, session.class_id)
         else:
-            probe = await run_in_threadpool(lambda: rec.encode(body, detection.box))
-            references = db.execute(
+            probe = await run_in_threadpool(rec.encode, body, detection.box)
+            rows = db.execute(
                 select(FaceReference, Student).join(Student, Student.id == FaceReference.student_id)
                 .where(Student.class_id == session.class_id)
             ).all()
-            recognition = match(probe, references)
+            recognition = match(probe, rows)
         if recognition is None:
             await event(db, session_id, device_id, "rejected", "unknown, uncertain or unavailable identity")
             return respond({"accepted": False, "reason": "unknown, uncertain or unavailable identity"}, detection)

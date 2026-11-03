@@ -1,9 +1,12 @@
 """Isolated API tests. AI acceptance is mocked; this is not PAD validation."""
+import json
 import os
 import tempfile
 import unittest
 from datetime import timedelta
 from unittest.mock import patch
+
+import numpy as np
 
 os.environ["ADMIN_PASSWORD"] = "test-password-only"
 os.environ["DEVICE_TOKEN"] = "test-device-only"
@@ -44,7 +47,7 @@ class ApiTests(unittest.TestCase):
         self.client.post("/api/devices/heartbeat", json={"name": "Camera"}, headers=self.device)
         self.client.put("/api/devices/cam/config", headers=self.auth, json={"session_id": self.session_id})
         with self.factory() as db:
-            db.add(FaceReference(student_id=self.student_id, embedding="[]", enrolled_by="test"))
+            db.add(FaceReference(student_id=self.student_id, embedding=json.dumps([0.0] * 128), enrolled_by="test"))
             db.commit()
         gate.tracks.clear()
 
@@ -106,7 +109,8 @@ class ApiTests(unittest.TestCase):
         with patch("app.api.attendance._detector") as detector, patch("app.api.attendance._pad") as pad, patch("app.api.attendance._recognizer") as recognizer:
             detector.return_value.detect_largest.return_value = (detection, "ok")
             pad.return_value.evaluate.return_value = PadResult(True, "passed", .99)
-            recognizer.return_value.recognize.return_value = RecognitionResult("SV1", .1)
+            recognizer.return_value.ready = True
+            recognizer.return_value.encode.return_value = np.zeros(128, dtype=np.float64)
             self.assertFalse(self.frame().json()["accepted"])
             self.assertFalse(self.frame().json()["accepted"])
             self.assertTrue(self.frame().json()["created"])
