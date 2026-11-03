@@ -39,6 +39,17 @@ async def session_events(websocket: WebSocket, session_id: int, db: Session = De
         manager.disconnect(session_id, websocket)
 
 
+def _preview_meta_payload(device_id: str, db: Session) -> dict:
+    from app.api.devices import config_response
+    from app.services.camera_preview import previews
+    db.rollback()
+    config = config_response(device_id, db)
+    metadata = previews.metadata(device_id)
+    if not config["active"] or metadata.get("session_id") != config["session_id"]:
+        metadata["result"] = {"state": "preview"}
+    return {"type": "meta", **metadata, "config": config}
+
+
 @router.websocket("/ws/devices/{device_id}/camera")
 async def camera_stream(websocket: WebSocket, device_id: str, db: Session = Depends(get_db)):
     from app.models import Device
@@ -58,12 +69,20 @@ async def camera_stream(websocket: WebSocket, device_id: str, db: Session = Depe
         db.rollback()
         listener = previews.subscribe(device_id)
         sequence = -1
+        last_result_version = previews.get_result_version(device_id)
         last_auth_check = time.monotonic()
         while True:
             if time.monotonic() - last_auth_check > 60:
                 verify_token(credentials)
                 last_auth_check = time.monotonic()
             listener.clear()
+
+            current_result_version = previews.get_result_version(device_id)
+            if current_result_version != last_result_version:
+                last_result_version = current_result_version
+                meta = _preview_meta_payload(device_id, db)
+                await asyncio.wait_for(websocket.send_json(meta), timeout=3)
+
             frame = previews.get(device_id)
             if frame and frame["sequence"] != sequence:
                 sequence = frame["sequence"]

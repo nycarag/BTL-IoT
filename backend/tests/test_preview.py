@@ -38,6 +38,44 @@ class PreviewApiTests(unittest.TestCase):
         self.assertFalse(self.client.get("/api/devices/cam/preview", headers=self.auth).json()["available"])
         self.assertEqual(self.client.get("/api/devices/cam/preview.jpg", headers=self.auth).status_code, 404)
 
+    def test_camera_websocket_sends_meta_when_result_changes(self):
+        previews.frames.clear()
+        previews.results.clear()
+        token = self.auth["Authorization"].split()[1]
+        _, data = cv2.imencode(".jpg", np.zeros((160, 160, 3), dtype=np.uint8))
+        jpeg_bytes = data.tobytes()
+
+        with self.client.websocket_connect("/ws/devices/cam/camera") as ws:
+            ws.send_json({"token": token})
+
+            # 1. Add preview frame -> receives binary frame
+            previews.put("cam", jpeg_bytes, is_preview=True)
+            frame_bytes = ws.receive_bytes()
+            self.assertEqual(frame_bytes, jpeg_bytes)
+            # Send ACK next
+            ws.send_text("next")
+
+            # 2. Simulate AI analysis result update
+            seq_analysis = previews.begin_analysis("cam", jpeg_bytes, self.session_id)
+            previews.update(
+                "cam",
+                seq_analysis,
+                {
+                    "accepted": True,
+                    "student_code": "SV1",
+                    "box": [20, 25, 60, 60],
+                    "frame_size": [160, 160],
+                },
+            )
+
+            # 3. Receives meta message with new AI result
+            updated_meta = ws.receive_json()
+            self.assertEqual(updated_meta["type"], "meta")
+            self.assertTrue(updated_meta["result"]["accepted"])
+            self.assertEqual(updated_meta["result"]["student_code"], "SV1")
+            self.assertEqual(updated_meta["result"]["box"], [20, 25, 60, 60])
+            self.assertIn("config", updated_meta)
+
 
 class PreviewStoreTests(unittest.TestCase):
     def test_ttl_capacity_and_sequence(self):

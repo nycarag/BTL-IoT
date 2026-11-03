@@ -279,6 +279,68 @@
        3. `DeprecationWarning: Deprecated call to pkg_resources.declare_namespace('repoze').` tại `/usr/lib/python3/dist-packages/pkg_resources/__init__.py:3147`.
      - **Kết luận:** Cả 3 warnings đều xuất phát 100% từ thư viện ngoài bên thứ ba (`face_recognition_models` và `setuptools`/`pkg_resources` trên môi trường Python 3.14). Không có bất kỳ warning nào phát sinh từ mã nguồn trong `backend/app/*` (khi bỏ qua 2 module thư viện ngoài này, toàn bộ 79 tests vượt qua với 0 warning). Tuân thủ nguyên tắc không can thiệp mã nguồn thư viện ngoài.
 
+## Task T08: Độ Mượt Camera Trình Duyệt & Đẩy Metadata AI Qua WebSocket
+
+* **Ngày thực hiện:** 03/11/2026
+* **Nhánh git:** `overhaul/v2`
+* **Lý do kỹ thuật (UI/UX & Performance):**
+  - Trước đây, cả `CameraPanel.tsx` và `KioskView.tsx` đều tự quản lý vòng lặp WebSocket riêng với cơ chế nạp ảnh thô sơ (`URL.createObjectURL` + `new Image` + `image.decode` + gán `img.src`), đồng thời `CameraPanel` liên tục poll `GET /devices/{id}/preview` mỗi 800ms (KioskView poll 600ms) để lấy bounding box và trạng thái AI. Điều này gây ra độ trễ lệch pha nghiêm trọng giữa video và khung khuôn mặt (~1 giây), hao tốn băng thông và gây giật lag trình duyệt.
+  - Giải pháp tối ưu:
+    1. **Phía Server:** Đẩy trực tiếp message JSON `{"type": "meta", ...}` qua luồng WebSocket ngay khi kết quả AI thay đổi (`result_version`), trước frame hình tiếp theo. Giữ nguyên ACK `"next"` cho frame nhị phân (message meta không cần ACK).
+    2. **Phía Frontend:** Tạo custom hook duy nhất `useCameraStream(deviceId, token, apiUrl, paused)` trong `frontend/src/useCameraStream.ts`. Sử dụng Web API hiện đại `createImageBitmap` giải mã đa luồng (off-main-thread), vẽ lên `<canvas>` qua `requestAnimationFrame`, chỉ giữ frame mới nhất và gọi `bitmap.close()` ngay sau khi vẽ để triệt tiêu rò rỉ bộ nhớ.
+    3. Tính toán và hiển thị FPS thực tế (rolling average 1 giây), cập nhật giao diện tối đa 2 lần/giây để không gây re-render thừa.
+    4. Căn chỉnh khung khuôn mặt và vùng ROI bằng overlay tuyệt đối theo tỷ lệ contain (`object-fit: contain`) chuẩn xác theo kích thước render thực tế của canvas hiển thị, đảm bảo không bị lệch tọa độ khi resize hoặc trên các màn hình tỉ lệ khác nhau.
+
+### Danh sách tệp thay đổi
+
+| Tệp tin | Hành động | Nội dung thay đổi | Lý do kỹ thuật |
+|---|---|---|---|
+| `backend/app/services/camera_preview.py` | Chỉnh sửa | Bổ sung `self.result_version`, tăng version khi bắt đầu phân tích AI (`begin_analysis`) và khi có kết quả (`update`); kích hoạt `listener.set()` để đánh thức luồng websocket; bổ sung hàm `get_result_version(device_id)`. | Cho phép luồng camera stream nhận biết chính xác thời điểm kết quả AI thay đổi để phát tán metadata kịp thời. |
+| `backend/app/api/websocket.py` | Chỉnh sửa | Trong `camera_stream`: so sánh `current_result_version` với `last_result_version`, đẩy message JSON `{"type": "meta", ...}` có cùng schema của `GET /devices/{id}/preview` trước khi gửi frame nhị phân tiếp theo. Giữ nguyên giao thức ACK `"next"`, auth timeout và dọn dẹp kết nối. | Loại bỏ hoàn toàn nhu cầu HTTP polling định kỳ 800ms từ client, đồng bộ hóa 100% video và metadata nhận diện. |
+| `backend/tests/test_preview.py` | Chỉnh sửa | Bổ sung bài test `test_camera_websocket_sends_meta_when_result_changes` kiểm tra kết nối WebSocket nhận được frame binary, gửi ACK "next", và nhận được metadata cập nhật khi AI hoàn tất phân tích. | Đảm bảo tính toàn vẹn và ngăn ngừa hồi quy logic WebSocket camera. |
+| `frontend/src/useCameraStream.ts` | Tạo mới | Hook dùng chung `useCameraStream`: kết nối WS, nhận Blob $\rightarrow$ `createImageBitmap` $\rightarrow$ vẽ canvas qua `requestAnimationFrame` (chỉ frame mới nhất, đóng bitmap cũ) $\rightarrow$ gửi "next" ngay sau khi decode; nhận "meta" $\rightarrow$ cập nhật state; tự reconnect 1s; tính FPS thực tế trung bình trượt 1s (cập nhật state $\le 2$ lần/s); tính toán overlay contain-fit không lệch khi resize. | Hợp nhất logic streaming camera về một nơi duy nhất, tối ưu hiệu năng render và loại bỏ mã nguồn trùng lặp. |
+| `frontend/src/CameraPanel.tsx` | Chỉnh sửa | Thay thế toàn bộ mã WebSocket và polling HTTP 800ms bằng `useCameraStream`; thay thế thẻ `<img>` bằng `<canvas>`; căn chỉnh khung mặt và ROI theo tỷ lệ contain; hiển thị badge FPS. | Nâng cao độ mượt hiển thị, đồng bộ hóa khung mặt với video. |
+| `frontend/src/KioskView.tsx` | Chỉnh sửa | Thay thế toàn bộ mã WebSocket và polling HTTP 600ms bằng `useCameraStream`; thay thế thẻ `<img>` bằng `<canvas>`; đồng bộ hóa sự kiện điểm danh thành công/âm thanh bíp ngay khi nhận metadata từ WS; hiển thị badge FPS. | Đảm bảo trải nghiệm kiosk tức thời, mượt mà và chuyên nghiệp. |
+| `frontend/src/styles.css` | Chỉnh sửa | Bổ sung CSS cho `.camera-fps-badge` (chữ nhỏ, màu phụ, căn góc phải) và `.camera-face-label`. | Hoàn thiện giao diện HUD theo chuẩn thiết kế. |
+
+### Các đoạn mã cũ đã loại bỏ ở 2 component Frontend
+
+1. **`frontend/src/CameraPanel.tsx`:**
+   - Xóa `const imgRef = useRef<HTMLImageElement>(null);` và các state cục bộ `preview`, `hasSource`, `error`.
+   - Xóa toàn bộ khối `useEffect` (dòng 33–104 ở phiên bản cũ, gồm ~72 dòng mã) chứa:
+     - Logic tạo `new WebSocket(...)`, cài đặt `socket.binaryType = "blob"`.
+     - Logic giải mã ảnh qua `URL.createObjectURL(event.data)`, `new Image()`, `image.decode()`, thu hồi `URL.revokeObjectURL`.
+     - Vòng lặp đệ quy `update()` gọi `fetch(/devices/{id}/preview)` định kỳ mỗi 800ms (`timer = window.setTimeout(update, 800)`).
+   - Thay thế thẻ `<img ref={imgRef} ... />` bằng `<canvas ref={canvasRef} ... />`.
+
+2. **`frontend/src/KioskView.tsx`:**
+   - Xóa `const imgRef = useRef<HTMLImageElement>(null);` và các state cục bộ `preview`, `hasSource`, `error`.
+   - Xóa toàn bộ khối `useEffect` (dòng 107–231 ở phiên bản cũ, gồm ~125 dòng mã) chứa:
+     - Logic kết nối WebSocket trùng lặp và giải mã `URL.createObjectURL` qua thẻ `Image`.
+     - Vòng lặp đệ quy `update()` poll HTTP `GET /devices/{id}/preview` mỗi 600ms.
+   - Thay thế thẻ `<img ref={imgRef} alt="Stream Kiosk" />` bằng `<canvas ref={canvasRef} ... />`.
+
+### Đo nghiệm thực tế độ mượt qua Script giả lập (CHƯA KIỂM CHỨNG TRÊN CAMERA THẬT)
+
+Do không có camera vật lý ESP32-CAM trong môi trường phát triển, hệ thống đã thực hiện đo nghiệm độc lập qua kịch bản kiểm thử tự động tại `scratchpad/work/benchmark_stream.py`:
+- Backend được khởi chạy độc lập trên port 8923 với cơ sở dữ liệu tạm thời.
+- Một tiến trình camera giả lập liên tục nạp ảnh JPEG độ phân giải CIF 400×296 (có nhãn bộ đếm frame tăng dần) vào endpoint `POST /api/devices/cam-bench/preview` với tốc độ đích ~28 FPS.
+- Một client Python WebSocket kết nối tới `/ws/devices/cam-bench/camera`, xác thực bằng token giảng viên, nhận dữ liệu ảnh nhị phân và phản hồi ACK `"next"` ngay lập tức trong vòng 10 giây liên tục.
+
+**Kết quả đo nghiệm thực tế ghi nhận:**
+- Thời gian đo kiểm liên tục: **10.0 giây**.
+- Tổng số frame nhị phân nhận thành công: **269 frames**.
+- Tốc độ truyền nhận luồng video (Stream FPS): **26.89 FPS**.
+- Khoảng cách thời gian trung bình giữa 2 frame (Mean Inter-Frame Interval): **37.31 ms**.
+- Phân vị 95 độ trễ liên khung hình (P95 Inter-Frame Interval): **39.10 ms**.
+- **Đánh giá:** Luồng truyền hình ảnh qua WebSocket đạt độ ổn định và mượt mà cao (~27 FPS với chu kỳ ~37ms), đáp ứng hoàn hảo tiêu chuẩn mượt mà 25–30 FPS của trình duyệt, không xảy ra hiện tượng tồn đọng frame nhờ cơ chế ACK `"next"`.
+
+### Kết quả kiểm thử tự động & Build
+
+- Kiểm thử Frontend: `npm run build` $\rightarrow$ **Thành công 100% (0 lỗi TypeScript, 35 modules transformed trong 1.06s)**.
+- Kiểm thử Backend: `PYTHONPATH=backend pytest backend/tests -q` $\rightarrow$ **80 passed** (100% test suite vượt qua).
+
+
 
 
 

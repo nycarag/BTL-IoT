@@ -1,12 +1,20 @@
-import { useEffect, useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
+import {
+  useCameraStream,
+  computeContainOverlay,
+  computeRoiOverlay,
+  Preview,
+} from "./useCameraStream";
 
 type Device = { id: string; name: string; status: string };
-type Preview = {
-  available: boolean; received_at?: string; session_id?: number | null;
-  config: { session_id: number | null; active: boolean; roi_left: number; roi_top: number; roi_right: number; roi_bottom: number };
-  result?: { accepted?: boolean; created?: boolean; reason?: string; state?: string; student_code?: string; pad_score?: number; box?: number[]; frame_size?: number[] };
+type Props = {
+  api: (path: string, init?: RequestInit) => Promise<Response>;
+  devices: Device[];
+  selectedSession: string;
+  token: string;
+  apiUrl: string;
 };
-type Props = { api: (path: string, init?: RequestInit) => Promise<Response>; devices: Device[]; selectedSession: string; token: string; apiUrl: string };
+
 const reasons: Record<string, string> = {
   "waiting for stable face": "Giữ khuôn mặt ổn định trong vùng điểm danh",
   "no face detected": "Chưa phát hiện khuôn mặt",
@@ -20,95 +28,45 @@ const reasons: Record<string, string> = {
 
 export default function CameraPanel({ api, devices, selectedSession, token, apiUrl }: Props) {
   const [camera, setCamera] = useState("");
-  const [preview, setPreview] = useState<Preview | null>(null);
-  const [hasSource, setHasSource] = useState(false);
-  const [error, setError] = useState("");
   const [paused, setPaused] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const effectiveCamera = devices.some(d => d.id === camera) ? camera : devices[0]?.id ?? "";
   const apiRef = useRef(api);
   apiRef.current = api;
-  const imgRef = useRef<HTMLImageElement>(null);
 
+  // Stream hook duy nhất quản lý WebSocket, canvas rendering và FPS
+  const { canvasRef, meta, fps, connected: hasSource, error: streamError, canvasSize } =
+    useCameraStream(effectiveCamera, token, apiUrl, paused);
+
+  // Lấy config 1 lần lúc mount hoặc đổi camera (fallback khi chưa có meta từ WS)
+  const [fallbackConfig, setFallbackConfig] = useState<Preview["config"] | null>(null);
   useEffect(() => {
-    if (!effectiveCamera || paused) return;
-    let stopped = false; let timer: number; let reconnect: number; let objectUrl = "";
-    let socket: WebSocket; let lastImage = Date.now();
-    const controller = new AbortController();
-    const release = () => {
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-      objectUrl = "";
-      if (imgRef.current) imgRef.current.src = "";
-    };
-    const connect = () => {
-      const url = new URL(`/ws/devices/${encodeURIComponent(effectiveCamera)}/camera`, apiUrl || window.location.origin);
-      url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-      socket = new WebSocket(url); socket.binaryType = "blob";
-      socket.onopen = () => socket.send(JSON.stringify({ token }));
-      socket.onmessage = async event => {
-        if (typeof event.data === "string") {
-          return;
+    if (!effectiveCamera) return;
+    let cancelled = false;
+    apiRef.current(`/devices/${encodeURIComponent(effectiveCamera)}/preview`)
+      .then(res => res.json())
+      .then((data: Preview) => {
+        if (!cancelled && data.config) {
+          setFallbackConfig(data.config);
         }
-        const currentSocket = socket;
-        const nextUrl = URL.createObjectURL(event.data);
-        const image = new Image(); image.src = nextUrl;
-        try {
-          await image.decode();
-          if (stopped || currentSocket !== socket) {
-            URL.revokeObjectURL(nextUrl);
-            return;
-          }
-          const oldUrl = objectUrl;
-          objectUrl = nextUrl;
-          if (imgRef.current) {
-            imgRef.current.src = nextUrl;
-          }
-          setHasSource(true);
-          setError("");
-          lastImage = Date.now();
-          if (oldUrl) URL.revokeObjectURL(oldUrl);
-          if (!stopped && currentSocket.readyState === WebSocket.OPEN) {
-            currentSocket.send("next");
-          }
-        } catch {
-          URL.revokeObjectURL(nextUrl);
-          if (!stopped && currentSocket.readyState === WebSocket.OPEN) {
-            currentSocket.send("next");
-          }
-        }
-      };
-      socket.onclose = event => {
-        if (stopped) return;
-        setError(event.code === 4401 ? "Phiên xem camera hết hạn — đăng nhập lại" : "Đang kết nối lại luồng camera…");
-        if (event.code !== 4401) reconnect = window.setTimeout(connect, 1000);
-      };
-      socket.onerror = () => socket.close();
-    };
-    const update = async () => {
-      try {
-        const path = `/devices/${encodeURIComponent(effectiveCamera)}/preview`;
-        const metadata: Preview = await (await apiRef.current(path, { signal: controller.signal, cache: "no-store" })).json();
-        if (!stopped) {
-          setPreview(metadata);
-          if (Date.now() - lastImage > 15000 && !metadata.available) {
-            release();
-            setHasSource(false);
-          }
-        }
-      } catch (e) {
-        if (!stopped) { setError(e instanceof Error ? e.message : "Mất kết nối ảnh camera"); }
-      } finally { if (!stopped) timer = window.setTimeout(update, 800); }
-    };
-    connect(); void update();
-    return () => { stopped = true; controller.abort(); clearTimeout(timer); clearTimeout(reconnect); socket?.close(); release(); };
-  }, [effectiveCamera, paused, token, apiUrl]);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [effectiveCamera]);
 
+  const preview: Preview | null = meta || (fallbackConfig ? ({ available: false, config: fallbackConfig } as Preview) : null);
   const result = preview?.result;
+  const error = streamError;
   const wrongSession = Boolean(preview && (selectedSession ? Number(selectedSession) !== preview.config.session_id : false));
   const verified = hasSource && !wrongSession && preview?.config.active && preview.session_id === preview.config.session_id && result?.accepted === true && !paused;
   const title = paused ? "Đã tạm dừng xem trước" : !hasSource ? "Chưa có ảnh camera" : wrongSession ? "Camera đang xử lý buổi học khác" : verified ? result?.created === false ? "Đã có mặt trong buổi học" : "Điểm danh thành công" : result?.state === "processing" ? "Đang xử lý…" : result?.state === "preview" ? "Xem trước" : "Đang xác thực";
   const reason = result?.reason ? reasons[result.reason] ?? result.reason : "Đứng trong khung ROI và nhìn thẳng camera.";
   const roi = preview?.config;
+
+  // Tính toán overlay theo tỷ lệ contain chuẩn xác không lệch khi resize
+  const frameSize = result?.frame_size;
+  const boxOverlay = computeContainOverlay(result?.box, frameSize, canvasSize.width, canvasSize.height);
+  const roiOverlay = computeRoiOverlay(roi, frameSize, canvasSize.width, canvasSize.height);
 
   return <section className={`panel camera-panel${expanded ? " camera-expanded" : ""}`}>
     <div className="panel-head"><div><h2>Camera điểm danh</h2></div><div className="actions"><button className="secondary" onClick={() => setPaused(!paused)}>{paused ? "Tiếp tục" : "Tạm dừng"}</button><button className="secondary" onClick={() => setExpanded(!expanded)}>{expanded ? "Thu gọn" : "Phóng to"}</button></div></div>
@@ -116,8 +74,18 @@ export default function CameraPanel({ api, devices, selectedSession, token, apiU
     <div className="camera-layout">
       <div className="camera-view">
         <div className="camera-image-wrap" style={{ display: hasSource && !paused ? "block" : "none" }}>
-          <img ref={imgRef} alt="Ảnh hiện tại từ camera điểm danh" onError={() => { setHasSource(false); setError("Không đọc được ảnh camera"); }} />
-          {roi && <div className="camera-roi" style={{ left: `${roi.roi_left * 100}%`, top: `${roi.roi_top * 100}%`, width: `${(roi.roi_right - roi.roi_left) * 100}%`, height: `${(roi.roi_bottom - roi.roi_top) * 100}%` }}><span>VÙNG ĐIỂM DANH</span></div>}
+          <canvas ref={canvasRef} style={{ width: "100%", height: "auto", display: "block" }} />
+          {roiOverlay && (
+            <div className="camera-roi" style={roiOverlay}>
+              <span>VÙNG ĐIỂM DANH</span>
+            </div>
+          )}
+          {boxOverlay && (
+            <div className="camera-face" style={boxOverlay}>
+              <span className="camera-face-label">{result?.student_code || "Khuôn mặt"}</span>
+            </div>
+          )}
+          {hasSource && <span className="camera-fps-badge">{fps} FPS</span>}
         </div>
         {(!hasSource || paused) && (
           <div className="camera-placeholder">

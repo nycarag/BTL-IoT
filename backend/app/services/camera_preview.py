@@ -11,6 +11,7 @@ class PreviewStore:
         self.frames = OrderedDict()
         self.results = OrderedDict()
         self.sequence = 0
+        self.result_version = 0
         self.listeners = {}
 
     def _expire(self):
@@ -62,23 +63,37 @@ class PreviewStore:
             self.put(device_id, image, session_id, is_preview=False)
         self.sequence += 1
         sequence = self.sequence
+        self.result_version += 1
         self.results[device_id] = {
-            "sequence": sequence, "time": now, "session_id": session_id,
+            "sequence": sequence, "version": self.result_version, "time": now, "session_id": session_id,
             "result": {"state": "processing"},
         }
         self.results.move_to_end(device_id)
         while len(self.results) > self.capacity:
             self.results.popitem(last=False)
+        for listener in self.listeners.get(device_id, ()):
+            listener.set()
         return sequence
 
     def update(self, device_id, sequence, result):
+        self.result_version += 1
         analysis = self.results.get(device_id)
         if analysis and analysis["sequence"] == sequence:
             analysis["result"] = result
+            analysis["version"] = self.result_version
             analysis["time"] = time.monotonic()
         frame = self.frames.get(device_id)
         if frame and frame["sequence"] == sequence:
             frame["result"] = result
+        for listener in self.listeners.get(device_id, ()):
+            listener.set()
+
+    def get_result_version(self, device_id):
+        self._expire()
+        analysis = self.results.get(device_id)
+        if analysis:
+            return analysis.get("version", 0)
+        return 0
 
     def get(self, device_id):
         self._expire()
