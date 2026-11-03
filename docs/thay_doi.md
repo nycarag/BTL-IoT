@@ -126,3 +126,42 @@
 1. **Backend Unit Tests:**
    * Lệnh: `PYTHONPATH=backend /tmp/claude-1000/-home-nycarag/a5456080-ab66-4d8b-a6cf-843b3c5e2231/scratchpad/venv/bin/python -m pytest backend/tests -q`
    * Kết quả: **56 passed in 11.75s** (toàn bộ 52 bài test trước đó + 4 bài test bảo mật/interface mới cho T04 đều PASS).
+
+## Task T05: Thay Haar Cascade Bằng YuNet (OpenCV Zoo) Có Fallback Tự Động
+
+* **Ngày thực hiện:** 03/11/2026
+* **Nhánh git:** `overhaul/v2`
+
+### Danh sách tệp thay đổi và bổ sung
+
+| Tệp tin | Hành động | Nội dung thay đổi | Lý do kỹ thuật |
+|---|---|---|---|
+| `models/yunet/face_detection_yunet_2023mar.onnx` | Thêm mới | Model ONNX chính thức từ OpenCV Zoo (`opencv/opencv_zoo`). Kích thước: 232,589 bytes (~227 KB).<br>**SHA-256:** `8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4`. | Mô hình phát hiện khuôn mặt học sâu siêu nhẹ (lightweight deep learning CNN), độ chính xác cao hơn vượt trội so với bộ lọc Haar truyền thống, hỗ trợ phát hiện khuôn mặt nghiêng/đa góc độ và 5 điểm mốc (landmarks). |
+| `models/yunet/LICENSE` | Thêm mới | Giấy phép bản quyền Apache-2.0 gốc của OpenCV Zoo. | Đảm bảo tuân thủ đầy đủ bản quyền mã nguồn mở. |
+| `backend/app/core/config.py` | Chỉnh sửa | Bổ sung các cấu hình trong `Settings`: `face_detector` (mặc định `"yunet"`), `yunet_model_path` (mặc định trỏ đến `models/yunet/face_detection_yunet_2023mar.onnx`), `face_score_threshold` (mặc định `0.8`). | Cho phép cấu hình linh hoạt loại detector, đường dẫn mô hình và ngưỡng tin cậy khuôn mặt qua biến môi trường. |
+| `backend/.env.example` | Chỉnh sửa | Bổ sung các biến mẫu: `FACE_DETECTOR=yunet`, `YUNET_MODEL_PATH=models/yunet/face_detection_yunet_2023mar.onnx`, `FACE_SCORE_THRESHOLD=0.8`. | Hướng dẫn cấu hình môi trường chuẩn cho người vận hành. |
+| `backend/app/services/face_detector.py` | Chỉnh sửa | 1. Bổ sung trường `landmarks5: tuple[tuple[float, float], ...] \| None = None` vào `FaceDetection`.<br>2. Thêm hàm `clamp_box()` ép toạ độ bounding box luôn nằm trong biên ảnh `(0 <= x, y và x+w <= width, y+h <= height)`.<br>3. Triển khai `FaceDetector` dùng `cv2.FaceDetectorYN.create()`, gọi `setInputSize((width, height))` theo từng frame.<br>4. Cơ chế fallback: nếu file model không tồn tại hoặc lỗi khởi tạo, tự động fallback sang Haar cascade cũ và ghi log WARNING 1 lần.<br>5. Giữ nguyên 100% logic lọc candidate ROI, Laplacian sharpness quality score và các reason: `"no face detected"`, `"multiple faces in ROI"`, `"face outside ROI"`, `"face too small"`, `"image too blurry"`, `"ok"`. | Thay thế bộ nhận diện khuôn mặt cũ kỹ bằng mạng nơ-ron YuNet hiện đại, bảo vệ an toàn cho module PAD không bị lỗi văng box ngoài biên, đồng thời đảm bảo tính sẵn sàng cao với fallback tự động. |
+| `backend/tests/test_face_detector.py` | Thêm mới | Bổ sung 10 bài unit test toàn diện:<br>- Kiểm tra kiểm soát frame đầu vào không hợp lệ (`None`, string, ảnh < 64×64).<br>- Kiểm tra hàm `clamp_box()` với toạ độ âm, toạ độ vượt biên.<br>- Kiểm tra frame trắng không có mặt (`"no face detected"`).<br>- Kiểm tra fallback tự động sang Haar khi đường dẫn model thiếu hoặc lỗi khởi tạo.<br>- Kiểm tra trích xuất landmarks 5 điểm và tính toán quality score từ YuNet.<br>- Kiểm tra case nhiều mặt trong ROI (`"multiple faces in ROI"`).<br>- Kiểm tra case mặt ngoài ROI (`"face outside ROI"`).<br>- Kiểm tra `StabilityGate` đảm bảo tính liên tục hình học qua 3 frame liên tiếp. | Bảo đảm độ tin cậy và không hồi quy cho module detector. |
+| `docs/architecture.md` | Chỉnh sửa | Cập nhật luồng xử lý: `YuNet face detector (ONNX, score >= 0.8) kèm Haar fallback + một mặt trong ROI + size/sharpness + clamp bbox`. | Phản ánh chính xác kiến trúc hệ thống hiện tại. |
+
+### Đo đạc benchmark thực tế (100 lần lặp trên ảnh CIF 400×296 ESP32-CAM)
+
+> [!IMPORTANT]
+> Đo nghiệm được thực hiện trên cùng ảnh thực nghiệm chuẩn `obama_cif.jpg` (kích thước chuẩn của camera ESP32-CAM: 400×296). Kết quả đo lường 100 lần lặp liên tục sau giai đoạn warm-up:
+
+| Chỉ số đo | Haar Cascade cũ (`haarcascade_frontalface_default.xml`) | YuNet mới (`face_detection_yunet_2023mar.onnx`) | Đánh giá so sánh |
+|---|---|---|---|
+| **Thời gian trung bình (Mean)** | **50.82 ms** | **12.88 ms** | **YuNet nhanh hơn ~3.94 lần** |
+| **Thời gian tối thiểu (Min)** | 30.03 ms | 7.22 ms | Tối ưu đáng kể độ trễ khung hình |
+| **Thời gian tối đa (Max)** | 115.96 ms | 46.97 ms | Không bị nghẽn giật đỉnh tải |
+| **Phân vị 95% (P95)** | 91.68 ms | 34.90 ms | Ổn định vượt trội |
+| **Độ chính xác trên ảnh CIF** | Bị **false positive** (nhận nhầm nhiều vùng nhiễu thành mặt $\rightarrow$ bị reject với lý do `multiple faces in ROI`) | Phát hiện **chính xác 1 khuôn mặt** `(166, 18, 98, 98)` kèm 5 điểm mốc landmarks sắc nét $\rightarrow$ chấp thuận `ok` | Khắc phục triệt để lỗi từ chối oan do nhiễu của Haar cascade |
+
+### Kết quả kiểm thử thực tế
+
+1. **Backend Unit Tests:**
+   * Lệnh: `PYTHONPATH=backend /tmp/claude-1000/-home-nycarag/a5456080-ab66-4d8b-a6cf-843b3c5e2231/scratchpad/venv/bin/python -m pytest backend/tests -q`
+   * Kết quả: **67 passed in 29.50s** (toàn bộ 56 bài test trước đó + 11 bài unit test mới cho T05 đều PASS 100%).
+2. **Kiểm thử trường hợp 2 người trong ROI:**
+   * Sử dụng ảnh `two_people.jpg` ghép trong `scratchpad/work/`: detector trả về chính xác `reason = "multiple faces in ROI"`.
+

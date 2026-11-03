@@ -11,7 +11,7 @@ Laptop / FastAPI (một process)
   ├─ token thiết bị, assignment và phiên đang mở
   ├─ rate-limit / một ảnh đang xử lý mỗi device
   ├─ giới hạn 5 MiB, JPEG/PNG, 4 MP trước khi decode
-  ├─ Haar face detector + một mặt trong ROI + size/sharpness
+  ├─ YuNet face detector (ONNX, score ≥ 0.8) kèm Haar fallback + một mặt trong ROI + size/sharpness + clamp bbox
   ├─ geometric stability IoU qua N frame liên tiếp theo device/session
   ├─ MiniFASNetV2 ONNX / CPU → real softmax index 1
   ├─ dlib embedding 128D → Euclidean distance + ambiguity margin

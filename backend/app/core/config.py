@@ -17,6 +17,7 @@ load_dotenv(ROOT_DIR / ".env")
 load_dotenv(ROOT_DIR / "backend" / ".env")
 DATA_DIR = Path(os.getenv("ATTENDANCE_DATA_DIR", ROOT_DIR / "data"))
 DEFAULT_PAD_MODEL = str(ROOT_DIR / "models" / "minifasnet-v2" / "MiniFASNetV2.onnx")
+DEFAULT_YUNET_MODEL = str(ROOT_DIR / "models" / "yunet" / "face_detection_yunet_2023mar.onnx")
 
 DEFAULT_CORS_ORIGIN_REGEX = (
     r"^https?://(?:localhost|127\.0\.0\.1|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
@@ -54,6 +55,9 @@ class Settings:
     late_after_minutes: int = int(os.getenv("LATE_AFTER_MINUTES", "15"))
     frame_interval_seconds: float = float(os.getenv("FRAME_INTERVAL_SECONDS", "0.3"))
     preview_max_fps: int = max(1, min(60, int(os.getenv("PREVIEW_MAX_FPS", "30"))))
+    face_detector: str = os.getenv("FACE_DETECTOR", "yunet").lower().strip()
+    yunet_model_path: str = os.getenv("YUNET_MODEL_PATH", DEFAULT_YUNET_MODEL)
+    face_score_threshold: float = float(os.getenv("FACE_SCORE_THRESHOLD", "0.8"))
     pad_model_path: str = os.getenv("PAD_MODEL_PATH", DEFAULT_PAD_MODEL if os.path.exists(DEFAULT_PAD_MODEL) else "")
     pad_real_threshold: float = float(os.getenv("PAD_REAL_THRESHOLD", "0.45"))
     pad_crop_scale: float = float(os.getenv("PAD_CROP_SCALE", "2.7"))
