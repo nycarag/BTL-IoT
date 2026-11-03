@@ -72,7 +72,7 @@ Hệ thống điểm danh sinh viên tự động theo kiến trúc phân tầng
 7. **Điều khiển Cầu nối Camera từ Web & Chống SSRF**:
    * Quản lý tiến trình nền `camera_bridge.py` trực tiếp từ giao diện bảng điều khiển, hỗ trợ chuyển đổi nhanh giữa Webcam laptop và ESP32-CAM. Hàm kiểm thực URL chỉ cho phép kết nối tới IP private LAN hoặc loopback, chặn đứng nguy cơ tấn công SSRF vào mạng nội bộ.
 8. **Phản hồi âm thanh còi bíp HMI**:
-   * Tự động phát âm báo còi bíp tần số 1800Hz qua loa máy tính (`audio_service.py`) kết hợp Web Audio API trên trình duyệt ngay khi sinh viên điểm danh thành công.
+   * Backend phát file `beep_success.wav` qua loa máy chủ (`audio_service.py`), đồng thời giao diện kiosk trên trình duyệt phát thêm tiếng bíp Web Audio (ramp tới 1800 Hz) ngay khi sinh viên điểm danh thành công.
 
 ---
 
@@ -172,11 +172,11 @@ docker compose up --build -d
 1. **Phải đăng ký lại khuôn mặt sinh viên:**
    Bản cũ lưu trữ vector đã bị chuẩn hóa sớm theo chuẩn L2 (độ dài vector = 1.0). Thuật toán mới so khớp đa mẫu trên vector thô 128D nguyên bản của dlib để bảo toàn độ chính xác không gian đặc trưng. Dữ liệu cũ vẫn nạp được nhưng sẽ kích hoạt cảnh báo log và có thể gây sai lệch ngưỡng nhận diện.
 2. **Thiết lập `SECRET_KEY` cố định trong file `.env`:**
-   Nếu biến này bị bỏ trống, máy chủ sẽ tự sinh ngẫu nhiên một khóa tạm thời trong RAM. Điều này khiến toàn bộ JWT token của giảng viên bị vô hiệu hóa mỗi khi máy chủ khởi động lại.
+   Nếu biến này bị bỏ trống, máy chủ sẽ tự sinh ngẫu nhiên một khóa tạm thời trong RAM. Điều này khiến toàn bộ bearer token ký HMAC của giảng viên bị vô hiệu hóa mỗi khi máy chủ khởi động lại.
 3. **Nạp lại firmware cho bo mạch ESP32-CAM:**
    Firmware mới tách cổng độc lập theo chuẩn CameraWebServer: cổng 80 phục vụ cấu hình `/status` và chụp ảnh `/capture`, cổng 81 phục vụ stream MJPEG `/stream`. Cần nạp lại mã nguồn trong thư mục `firmware/esp32_cam_softap/`.
 4. **Tùy chọn `LIVENESS_MODE=off` khi demo hoặc kiểm thử:**
-   Thuật toán phát hiện chớp mắt (EAR) yêu cầu luồng preview ổn định đạt tối thiểu 10–15 FPS. Nếu camera ESP32 bị đặt ở góc nghiêng, khoảng cách xa hoặc đường truyền mạng Wi-Fi bị nghẽn làm tụt khung hình, người vận hành có thể tạm thời tắt cổng chớp mắt bằng cách đặt `LIVENESS_MODE=off` trong `.env`.
+   Thuật toán phát hiện chớp mắt (EAR) cần luồng preview liên tục (backend xử lý tối đa `LIVENESS_MAX_HZ=10` lần/giây). Khi camera đặt xa, góc nghiêng hoặc mạng chậm làm rớt khung hình, có thể đặt `LIVENESS_MODE=off` trong `.env` để tạm thời bỏ qua bước kiểm tra chớp mắt.
 
 ---
 

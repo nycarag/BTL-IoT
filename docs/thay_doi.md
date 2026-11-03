@@ -573,7 +573,7 @@ Module điều khiển và kiểm thử được port có chọn lọc từ repo
 ## [2026-11-03] TASK T12: Kiểm thử đầu-cuối (E2E) trên backend thật với dữ liệu ảnh thực tế
 
 ### Bối cảnh & Mục tiêu
-Thực hiện đợt kiểm thử tích hợp đầu-cuối (End-to-End) toàn diện trên quy trình nghiệp vụ thực tế của hệ thống: từ khởi động máy chủ Uvicorn độc lập, xác thực Admin JWT, quản lý danh mục (lớp học, sinh viên), đăng ký khuôn mặt trích xuất vector dlib 128D đa mẫu/đơn mẫu, quản lý phiên điểm danh và thiết bị, chạy pipeline phát hiện khuôn mặt YuNet + chống giả mạo MiniFASNet + kiểm soát chớp mắt thích ứng EAR trên luồng preview, truyền phát video WebSocket kèm ACK "next", cho đến xuất báo cáo CSV điểm danh.
+Thực hiện đợt kiểm thử tích hợp đầu-cuối (End-to-End) toàn diện trên quy trình nghiệp vụ thực tế của hệ thống: từ khởi động máy chủ Uvicorn độc lập, xác thực bearer token ký HMAC của admin, quản lý danh mục (lớp học, sinh viên), đăng ký khuôn mặt trích xuất vector dlib 128D đa mẫu/đơn mẫu, quản lý phiên điểm danh và thiết bị, chạy pipeline phát hiện khuôn mặt YuNet + chống giả mạo MiniFASNet + kiểm soát chớp mắt thích ứng EAR trên luồng preview, truyền phát video WebSocket kèm ACK "next", cho đến xuất báo cáo CSV điểm danh.
 
 ### Nguồn dữ liệu kiểm thử
 - Ảnh mẫu công khai: chân dung Barack Obama (`obama.jpg`, `obama2.jpg`, bản CIF `obama_cif.jpg`), chân dung Joe Biden (`biden.jpg`), và ảnh giả mạo màn hình/ảnh in `image_F1.jpg` của Minivision.
@@ -624,6 +624,11 @@ Sau chuỗi nâng cấp toàn diện từ T01 đến T12 (bảo mật CORS/SECRE
 - Lệnh: `PYTHONPATH=backend pytest backend/tests -q`
 - Kết quả: **97 passed, 3 warnings** (100% test suite đạt chuẩn).
 - Kiểm tra cú pháp Compose: `docker compose config --quiet` $\rightarrow$ **Thành công (mã thoát 0)**.
+
+### Rework T13: Hiệu chỉnh loại token, nguồn âm thanh và phát ngôn liveness
+- **Loại token:** Chuẩn hóa thuật ngữ sang "bearer token ký HMAC" (thay cho "JWT" vì `security.py` sử dụng `hmac.new` tự ký chuỗi base64 `username:expiry`, không phải chuẩn cấu trúc JSON Web Token).
+- **Nguồn âm thanh:** Làm rõ nguồn phát âm báo còi bíp: backend phát tệp `beep_success.wav` qua loa máy chủ (`audio_service.py`), còn kiosk trình duyệt phát thêm tiếng bíp Web Audio API tăng tần số tới 1800 Hz.
+- **Điều kiện liveness:** Xóa bỏ phát ngôn suy diễn sai về ngưỡng "10-15 FPS" tối thiểu; đính chính thuật toán EAR cần luồng preview liên tục với tần số xử lý tối đa `LIVENESS_MAX_HZ=10` lần/giây, khuyến nghị đặt `LIVENESS_MODE=off` khi camera đặt xa, góc nghiêng hoặc mạng chậm làm rớt khung hình.
 
 
 

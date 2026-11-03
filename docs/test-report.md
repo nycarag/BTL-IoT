@@ -54,7 +54,7 @@ Thu thập calibration và held-out test độc lập theo model-evaluation.md. 
 
 | Bước kiểm thử | Kỳ vọng | Thực tế đo được | Kết quả |
 |---|---|---|---|
-| **1. Admin Login** | Trả về status 200 kèm JWT access token hợp lệ khi cung cấp đúng thông tin xác thực admin | Status 200, cấp JWT access token thành công | **PASS** |
+| **1. Admin Login** | Trả về status 200 kèm bearer token ký HMAC hợp lệ khi cung cấp đúng thông tin xác thực admin | Status 200, cấp bearer token ký HMAC thành công | **PASS** |
 | **2.1 Tạo lớp học** | `POST /api/classes` tạo lớp mới mã `E2E_CLASS`, trả về status 201 kèm ID | Status 201, tạo thành công `ClassRoom` (ID=1, Code='E2E_CLASS') | **PASS** |
 | **2.2 Tạo sinh viên** | `POST /api/students` tạo 2 sinh viên `SV_OBAMA` và `SV_BIDEN`, trả về status 201 | Status 201, tạo thành công `SV_OBAMA` (ID=1) và `SV_BIDEN` (ID=2) | **PASS** |
 | **2.3 Đăng ký khuôn mặt SV_OBAMA (đa mẫu)** | `POST /api/students/{id}/face` nhận 2 ảnh (`obama.jpg` + `obama2.jpg`), trích xuất vector dlib 128D, lưu mảng đa mẫu thô | Status 200, `enrolled=True`, `samples=2`, `raw_image_stored=False` | **PASS** |
