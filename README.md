@@ -78,7 +78,7 @@ Các tham số được nạp từ file `.env`, định nghĩa tại `backend/ap
 
 Firmware `firmware/esp32_cam_softap/` phục vụ ảnh chụp và trạng thái ở cổng 80 (`/capture`, `/status`), luồng MJPEG ở cổng 81 (`/stream`).
 
-## Phạm vi chống gian lận và kiểm chứng
+## Chống gian lận
 
 | Tình huống | Lớp chặn | Bằng chứng |
 |---|---|---|
@@ -89,33 +89,20 @@ Firmware `firmware/esp32_cam_softap/` phục vụ ảnh chụp và trạng thái
 | Mặt lạ hoặc hai ứng viên quá gần | Ngưỡng 0.52 + margin 0.05 | test_pipeline.py::test_match_threshold_and_margin |
 | Điểm danh lặp lại | Ràng buộc một bản ghi/phiên | test_api.py::test_manual_attendance_duplicate_csv_and_close |
 
-Hệ thống hiện có 97 bài kiểm thử tự động pytest và kịch bản E2E đạt 14/14 bước thành công.
-
-### Ngoài phạm vi hiện tại
-
-- Video phát lại có chớp mắt thật và deepfake: Chưa có lớp phòng thủ riêng; mới thử nghiệm 1 mẫu ảnh tấn công, chưa đo APCER và BPCER theo chuẩn ISO/IEC 30107-3.
-- Độ chính xác nhận diện: Kịch bản E2E dùng ảnh công khai đo được khoảng cách 0.41 và 0.50 so với ngưỡng 0.52; chưa đo tỷ lệ FAR và FRR trên tập dữ liệu lớn.
-- Bảo mật kênh truyền: Các luồng API và WebSocket chạy qua HTTP chưa bật mã hóa TLS; biến DEVICE_TOKEN dùng chung cho mọi camera.
-- Phần cứng: Cảm biến OV2640 thu nhận kém khi gặp ngược sáng; chưa đo đạc sóng Wi-Fi và độ trễ trên mạch ESP32-CAM thực địa.
-
-Chi tiết hướng mở rộng xem tại Chương 6 báo cáo [docs/BaoCao_BTL_IoT_Nhom05.pdf](docs/BaoCao_BTL_IoT_Nhom05.pdf).
-
 ## Kiểm thử
-
-Chạy kiểm thử tự động với pytest:
 
 ```bash
 PYTHONPATH=backend pytest backend/tests -q
 ```
 
-Kết quả đo được: 97 passed, 3 warnings (cảnh báo DeprecationWarning từ thư viện bên ngoài). Chi tiết kiểm thử xem tại [docs/test-report.md](docs/test-report.md).
+97 passed; E2E 14/14 bước. Chi tiết: [docs/test-report.md](docs/test-report.md).
 
-## Tài liệu liên quan
+## Tài liệu
 
-- [docs/architecture.md](docs/architecture.md): Thiết kế kiến trúc phân tầng, đặc tả API và giao thức WebSocket.
-- [docs/camera-softap.md](docs/camera-softap.md): Hướng dẫn cấu hình phần cứng ESP32-CAM và mạng SoftAP.
-- [docs/docker.md](docs/docker.md): Hướng dẫn đóng gói và triển khai hệ thống bằng Docker Compose.
-- [docs/model-evaluation.md](docs/model-evaluation.md): Quy trình hiệu chuẩn và đánh giá mô hình nhận diện, PAD.
-- [docs/test-report.md](docs/test-report.md): Báo cáo kiểm thử tự động và kịch bản đầu-cuối.
-- [docs/thuyet-trinh.md](docs/thuyet-trinh.md): Tóm tắt kỹ thuật và kịch bản demo khi thuyết trình.
-- [docs/BaoCao_BTL_IoT_Nhom05.pdf](docs/BaoCao_BTL_IoT_Nhom05.pdf): Báo cáo tổng kết bài tập lớn của nhóm.
+- [Báo cáo BTL (PDF)](docs/BaoCao_BTL_IoT_Nhom05.pdf)
+- [Kiến trúc](docs/architecture.md)
+- [ESP32-CAM SoftAP](docs/camera-softap.md)
+- [Docker](docs/docker.md)
+- [Đánh giá mô hình](docs/model-evaluation.md)
+- [Kiểm thử](docs/test-report.md)
+- [Kịch bản thuyết trình](docs/thuyet-trinh.md)
