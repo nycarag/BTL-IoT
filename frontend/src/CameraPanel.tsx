@@ -15,16 +15,41 @@ type Props = {
   apiUrl: string;
 };
 
-const reasons: Record<string, string> = {
-  "waiting for stable face": "Giữ khuôn mặt ổn định trong vùng điểm danh",
-  "no face detected": "Chưa phát hiện khuôn mặt",
-  "face outside ROI": "Khuôn mặt đang ngoài vùng điểm danh",
-  "face too small": "Hãy đứng gần camera hơn",
-  "image too blurry": "Ảnh mờ — nhìn thẳng và giữ yên",
-  "multiple faces in ROI": "Chỉ một người đứng trong vùng điểm danh",
-  "spoof or uncertain PAD score": "PAD từ chối hoặc chưa đủ tin cậy",
-  "unknown, uncertain or unavailable identity": "Chưa nhận diện được — kiểm tra đăng ký khuôn mặt và trạng thái mô hình",
+export const REASON_MESSAGES: Record<string, string> = {
+  // Detector
+  "no face detected": "Nhìn thẳng vào camera",
+  "multiple faces in ROI": "Chỉ một người trong khung",
+  "face outside ROI": "Di chuyển vào giữa khung",
+  "face too small": "Lại gần camera hơn",
+  "image too blurry": "Đứng yên và nhìn thẳng",
+  "invalid image": "Ảnh lỗi — vui lòng thử lại",
+  "image is too small": "Ảnh quá nhỏ — lại gần camera",
+  // Attendance gate
+  "waiting for stable face": "Đứng yên trong khung",
+  // Liveness
+  "liveness: blink required": "Hãy chớp mắt một lần",
+  "liveness unavailable": "Liveness tạm tắt — nhìn thẳng camera",
+  // PAD
+  "spoof or uncertain PAD score": "Nhìn thẳng, bỏ khẩu trang và kính",
+  "valid detected face is required": "Nhìn rõ mặt vào camera",
+  "invalid PAD output": "Lỗi kiểm tra — vui lòng thử lại",
+  "PAD inference error": "Lỗi kiểm tra — vui lòng thử lại",
+  "PAD passed": "Xác thực thực thể thành công",
+  "PAD model is not configured": "Chưa cấu hình mô hình PAD",
+  "PAD model file is missing": "Thiếu mô hình PAD",
+  "PAD model or ONNX runtime incompatible; see server log": "Lỗi mô hình PAD",
+  // Recognition & Pipeline
+  "unknown, uncertain or unavailable identity": "Chưa nhận diện được — báo giảng viên",
+  "Pipeline failed; retry or use manual verification": "Lỗi hệ thống — thử lại hoặc điểm danh thủ công",
+  "Recognition threshold needs calibration": "Cần hiệu chuẩn ngưỡng nhận diện",
+  "Install requirements-recognition.txt to enable face embeddings": "Chưa cài mô hình nhận diện",
+  "Preview only; no attendance processed": "Chế độ xem trước",
 };
+
+export function getReasonInstruction(reason?: string | null): string {
+  if (!reason || reason === "ok") return "Nhìn thẳng vào camera để điểm danh";
+  return REASON_MESSAGES[reason] || reason;
+}
 
 export default function CameraPanel({ api: _api, devices, selectedSession, token, apiUrl }: Props) {
   const [camera, setCamera] = useState("");
@@ -42,7 +67,7 @@ export default function CameraPanel({ api: _api, devices, selectedSession, token
   const wrongSession = Boolean(preview && (selectedSession ? Number(selectedSession) !== preview.config.session_id : false));
   const verified = hasSource && !wrongSession && preview?.config.active && preview.session_id === preview.config.session_id && result?.accepted === true && !paused;
   const title = paused ? "Đã tạm dừng xem trước" : !hasSource ? "Chưa có ảnh camera" : wrongSession ? "Camera đang xử lý buổi học khác" : verified ? result?.created === false ? "Đã có mặt trong buổi học" : "Điểm danh thành công" : result?.state === "processing" ? "Đang xử lý…" : result?.state === "preview" ? "Xem trước" : "Đang xác thực";
-  const reason = result?.reason ? reasons[result.reason] ?? result.reason : "Đứng trong khung ROI và nhìn thẳng camera.";
+  const reason = getReasonInstruction(result?.reason);
   const roi = preview?.config;
 
   // Tính toán overlay theo tỷ lệ contain chuẩn xác không lệch khi resize

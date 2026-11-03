@@ -5,6 +5,7 @@ import {
   computeRoiOverlay,
   Preview,
 } from "./useCameraStream";
+import { getReasonInstruction } from "./CameraPanel";
 
 type Device = { id: string; name: string; status: string };
 type Student = { id: number; student_code: string; name: string; class_id: number | null; date_of_birth: string | null; enrolled: boolean };
@@ -184,6 +185,46 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
   const boxOverlay = computeContainOverlay(result?.box, frameSize, canvasSize.width, canvasSize.height);
   const roiOverlay = computeRoiOverlay(roi, frameSize, canvasSize.width, canvasSize.height);
 
+  // Xác định trạng thái kết quả điểm danh & liveness
+  const isBlinkRequired = Boolean(hasSource && result?.reason === "liveness: blink required");
+  const isSuccess = Boolean(hasSource && preview?.config.active && preview.session_id === preview.config.session_id && result?.accepted === true);
+  const isWaitingOrAuthenticating = Boolean(
+    hasSource && !isSuccess && (
+      isBlinkRequired ||
+      result?.reason === "waiting for stable face" ||
+      result?.state === "processing"
+    )
+  );
+  const isRejected = Boolean(
+    hasSource && !isSuccess && !isWaitingOrAuthenticating && (
+      result?.accepted === false ||
+      (Boolean(result?.reason) && result?.reason !== "ok" && result?.state !== "preview")
+    )
+  );
+
+  // 4 trạng thái màu khung mặt theo yêu cầu T09:
+  // - xam (dang tim / preview)
+  // - vang (dang xac thuc / cho chop mat / processing)
+  // - xanh (thanh cong / accepted)
+  // - do (bi tu choi PAD / khong nhan ra / loi)
+  const faceStatus = isSuccess
+    ? "green"
+    : isWaitingOrAuthenticating
+    ? "yellow"
+    : isRejected
+    ? "red"
+    : "gray";
+
+  const faceTagText = isSuccess
+    ? (result?.student_code || "HỢP LỆ")
+    : isBlinkRequired
+    ? "CHỚP MẮT"
+    : isWaitingOrAuthenticating
+    ? "ĐANG XÁC THỰC"
+    : isRejected
+    ? (result?.reason?.includes("spoof") ? "TỪ CHỐI (PAD)" : result?.reason?.includes("unknown") ? "CHƯA NHẬN DIỆN" : "CẦN ĐIỀU CHỈNH")
+    : "ĐANG TÌM";
+
   return (
     <div className="kiosk-container">
       <div className="kiosk-header">
@@ -266,13 +307,25 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
               {/* Khung chữ nhật bám theo khuôn mặt nhận diện (Face Bounding Box) */}
               {boxOverlay && (
                 <div
-                  className={`kiosk-face-box ${result?.accepted ? "verified" : result?.reason?.includes("spoof") ? "spoof" : "scanning"}`}
+                  className={`kiosk-face-box status-${faceStatus}`}
                   style={boxOverlay}
                 >
-                  <span className="face-tag">{result?.student_code || (result?.accepted ? "HỢP LỆ" : "ĐANG QUÉT")}</span>
+                  <span className="face-tag">{faceTagText}</span>
                 </div>
               )}
               {hasSource && <span className="camera-fps-badge">{fps} FPS</span>}
+              {/* Chỉ dẫn chớp mắt nổi bật khi reason là liveness blink */}
+              {isBlinkRequired && (
+                <div className="kiosk-blink-alert" role="alert" aria-live="assertive">
+                  <div className="blink-alert-inner">
+                    <span className="blink-eye-icon" aria-hidden="true">👁</span>
+                    <div className="blink-alert-text">
+                      <strong className="blink-alert-title">HÃY CHỚP MẮT MỘT LẦN</strong>
+                      <span className="blink-alert-sub">Chớp mắt tự nhiên để xác nhận người thật</span>
+                    </div>
+                  </div>
+                </div>
+              )}
               {/* Overlay thông báo điểm danh */}
               {activeAlert && (
                 <div className="kiosk-success-flash">
@@ -295,20 +348,16 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
             )}
           </div>
 
-          <div className="kiosk-instruction-bar">
-            <span className="kiosk-instruction-icon">ℹ</span>
-            <span>
+          <div className={`kiosk-instruction-bar${isBlinkRequired ? " blink-mode" : isRejected ? " error-mode" : ""}`}>
+            <span className="kiosk-instruction-icon" aria-hidden="true">
+              {isBlinkRequired ? "👁" : activeAlert ? "✓" : isRejected ? "!" : "ℹ"}
+            </span>
+            <span className="kiosk-instruction-text">
               {activeAlert
                 ? (activeAlert.isNew
                     ? `Điểm danh thành công: Sinh viên ${activeAlert.name} (${activeAlert.student_code}).`
                     : `Sinh viên ${activeAlert.name} (${activeAlert.student_code}) đã có mặt trong buổi học.`)
-                : result?.reason && result.reason !== "ok"
-                  ? (result.reason.includes("spoof")
-                      ? "Cảnh báo: Không thể xác thực khuôn mặt trực tiếp."
-                      : result.reason.includes("no face") || result.reason.includes("waiting")
-                        ? "Vui lòng nhìn thẳng vào camera trong khung nhận diện."
-                        : `Trạng thái: ${result.reason}`)
-                  : "Vui lòng nhìn thẳng vào camera để điểm danh."}
+                : getReasonInstruction(result?.reason)}
             </span>
           </div>
         </div>

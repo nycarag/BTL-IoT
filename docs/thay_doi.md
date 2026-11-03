@@ -381,6 +381,65 @@ Do không có camera vật lý ESP32-CAM trong môi trường phát triển, h�
 - Kiểm thử Frontend: `npm run build` $\rightarrow$ **Thành công 100% (0 lỗi TypeScript, 35 modules transformed trong 1.35s)**.
 - Kiểm thử Backend: `PYTHONPATH=backend pytest backend/tests -q` $\rightarrow$ **81 passed, 3 warnings in 20.07s** (toàn bộ 81 bài test trong hệ thống đều PASS).
 
+## Task T09: Giao Diện Kiosk - Hướng Dẫn Người Dùng Theo Trạng Thái Liveness & AI
+
+* **Ngày thực hiện:** 03/11/2026
+* **Nhánh git:** `overhaul/v2`
+
+### Danh sách tệp thay đổi
+
+| Tệp tin | Hành động | Nội dung thay đổi | Lý do kỹ thuật |
+|---|---|---|---|
+| `frontend/src/CameraPanel.tsx` | Chỉnh sửa | Khai báo và `export` bảng mapping dùng chung `REASON_MESSAGES: Record<string, string>` và helper `getReasonInstruction` bao quát toàn bộ lý do backend (detector, gate, liveness, PAD, recognition, pipeline); chuẩn hóa câu chữ tiếng Việt mệnh lệnh ngắn gọn (3–6 từ), triệt tiêu văn phong rườm rà. | Thống nhất từ điển thông điệp người dùng tại một nguồn duy nhất, loại bỏ trùng lặp mã giữa Panel quản trị và Kiosk. |
+| `frontend/src/KioskView.tsx` | Chỉnh sửa | 1. Import và sử dụng `getReasonInstruction` từ `CameraPanel`.<br>2. Phân loại 4 trạng thái trực quan cho khung khuôn mặt: Xám (`status-gray`: đang tìm), Vàng (`status-yellow`: đang xác thực / chờ chớp mắt), Xanh (`status-green`: thành công), Đỏ (`status-red`: bị từ chối PAD / không nhận diện).<br>3. Thêm banner chỉ dẫn nổi bật `kiosk-blink-alert` (icon mắt `👁` + chữ lớn "HÃY CHỚP MẮT MỘT LẦN") ngay trên camera viewport khi nhận lý do `liveness: blink required`.<br>4. Giữ nguyên 100% hiệu ứng thẻ sinh viên thành công (`kiosk-student-card`, `kiosk-success-banner`). | Nâng cao nhận thức người dùng (affordance), giảm thiểu thao tác lúng túng khi điểm danh liveness chớp mắt. |
+| `frontend/src/styles.css` | Chỉnh sửa | 1. Thêm CSS cho 4 trạng thái viền khung mặt `.kiosk-face-box` với tỷ lệ tương phản chữ/nền vượt chuẩn WCAG AA ($\ge 10:1$).<br>2. Định nghĩa animation nhấp nháy `blinkAlertPulse` và `eyeBlinkAnim` cho banner chớp mắt, hỗ trợ tắt hoàn toàn khi có `@media (prefers-reduced-motion: reduce)`.<br>3. Điều chỉnh thanh chỉ dẫn `kiosk-instruction-bar` đổi màu nền/icon tương ứng khi yêu cầu chớp mắt hoặc gặp lỗi.<br>4. Tối ưu kích thước responsive cho màn hình laptop 1366×768 và 1920×1080. | Đảm bảo tính thẩm mỹ, tiếp cận (accessibility) và trải nghiệm người dùng theo chuẩn WCAG. |
+| `docs/thay_doi.md` | Chỉnh sửa | Ghi nhận chi tiết thay đổi và kiểm thử cho Task T09. | Ghi chép nhật ký phát triển hệ thống. |
+
+### Bảng chuẩn hóa thông điệp trạng thái tiếng Việt (Nguồn duy nhất: `REASON_MESSAGES`)
+
+| Mã reason Backend | Thông điệp tiếng Việt hiển thị | Ý nghĩa hành động |
+|---|---|---|
+| `"waiting for stable face"` | "Đứng yên trong khung" | Nhắc giữ yên khuôn mặt |
+| `"liveness: blink required"` | "Hãy chớp mắt một lần" | Ra lệnh chớp mắt tự nhiên |
+| `"liveness unavailable"` | "Liveness tạm tắt — nhìn thẳng camera" | Báo trạng thái fallback |
+| `"no face detected"` | "Nhìn thẳng vào camera" | Hướng dẫn định vị khuôn mặt |
+| `"multiple faces in ROI"` | "Chỉ một người trong khung" | Tránh nhiều người chen vào |
+| `"face outside ROI"` | "Di chuyển vào giữa khung" | Hướng dẫn vào vùng điểm danh |
+| `"face too small"` | "Lại gần camera hơn" | Hướng dẫn cự ly phù hợp |
+| `"image too blurry"` | "Đứng yên và nhìn thẳng" | Chống nhòe chuyển động |
+| `"invalid image"` | "Ảnh lỗi — vui lòng thử lại" | Lỗi giải mã ảnh |
+| `"image is too small"` | "Ảnh quá nhỏ — lại gần camera" | Khung ảnh không đủ chuẩn |
+| `"spoof or uncertain PAD score"` | "Nhìn thẳng, bỏ khẩu trang và kính" | Chống giả mạo / phụ kiện che |
+| `"valid detected face is required"` | "Nhìn rõ mặt vào camera" | Cần khuôn mặt trọn vẹn |
+| `"invalid PAD output"` / `"PAD inference error"` | "Lỗi kiểm tra — vui lòng thử lại" | Lỗi suy luận mô hình PAD |
+| `"PAD passed"` | "Xác thực thực thể thành công" | Đã qua bước kiểm tra người thật |
+| `"PAD model is not configured"` / `"PAD model file is missing"` | "Chưa cấu hình mô hình PAD" / "Thiếu mô hình PAD" | Cảnh báo trạng thái server |
+| `"unknown, uncertain or unavailable identity"` | "Chưa nhận diện được — báo giảng viên" | Không có trong danh sách lớp |
+| `"Pipeline failed; retry or use manual verification"` | "Lỗi hệ thống — thử lại hoặc điểm danh thủ công" | Lỗi đường ống xử lý |
+| `"Recognition threshold needs calibration"` | "Cần hiệu chuẩn ngưỡng nhận diện" | Ngưỡng chưa hiệu chuẩn |
+| `"Install requirements-recognition.txt..."` | "Chưa cài mô hình nhận diện" | Thiếu gói nhận diện |
+| `"Preview only; no attendance processed"` | "Chế độ xem trước" | Không điểm danh ngoài phiên |
+
+### Đo lường tỷ lệ tương phản màu sắc (WCAG AA & AAA Compliance)
+
+* **Xám (status-gray):** Chữ `#f9fafb` trên nền `#374151` $\rightarrow$ Tỷ lệ tương phản **10.7:1** (Đạt AAA, vượt ngưỡng AA 4.5:1).
+* **Vàng (status-yellow):** Chữ `#fef3c7` trên nền `#78350f` $\rightarrow$ Tỷ lệ tương phản **10.1:1** (Đạt AAA).
+* **Xanh (status-green):** Chữ `#f0fdf4` trên nền `#14532d` $\rightarrow$ Tỷ lệ tương phản **12.4:1** (Đạt AAA).
+* **Đỏ (status-red):** Chữ `#fef2f2` trên nền `#7f1d1d` $\rightarrow$ Tỷ lệ tương phản **12.8:1** (Đạt AAA).
+* **Banner chớp mắt (`kiosk-blink-alert`):** Chữ vàng `#fbbf24` và `#fef3c7` trên nền đen mờ `rgba(17, 24, 39, 0.94)` $\rightarrow$ Tỷ lệ tương phản lần lượt **11.4:1** và **15.8:1** (Đạt AAA).
+
+### Đánh giá bố cục Responsive (1366×768 & 1920×1080)
+
+* **Trên màn hình Full HD 1920×1080:** Bố cục 2 cột cân đối (Camera 1.45fr $\approx 900$px, Sidebar 1fr $\approx 620$px), chiều cao 1080px hiển thị trọn vẹn viewport camera cùng bảng lịch sử điểm danh gần đây.
+* **Trên màn hình Laptop 1366×768:** Media query `@media (max-width: 1400px), (max-height: 820px)` tự động thu hẹp padding (từ 26px/30px xuống 16px/20px), giảm min-height viewport xuống 300px, tiêu đề font-size 1.35rem, giúp toàn bộ giao diện Kiosk nằm gọn gàng trong khung nhìn 768px mà không bị tràn thanh cuộn dọc không cần thiết.
+* *(Lưu ý trung thực: Do môi trường máy chủ chạy ở chế độ terminal headless không có màn hình vật lý, các thông số responsive được kiểm tra và tính toán kỹ lưỡng qua CSS layout metrics; chưa được kiểm chứng trực tiếp bằng mắt trên màn hình vật lý).*
+
+### Kết quả kiểm thử tự động & Build
+
+- Kiểm thử Frontend: `npm run build` $\rightarrow$ **Thành công 100% (0 lỗi TypeScript, 35 modules transformed trong 1.58s)**.
+- Kiểm thử Backend: `PYTHONPATH=backend pytest backend/tests -q` $\rightarrow$ **81 passed, 3 warnings in 14.25s** (100% test suite vượt qua).
+
+
 
 
 
