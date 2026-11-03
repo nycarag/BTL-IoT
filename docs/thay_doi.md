@@ -137,7 +137,7 @@
 | Tệp tin | Hành động | Nội dung thay đổi | Lý do kỹ thuật |
 |---|---|---|---|
 | `models/yunet/face_detection_yunet_2023mar.onnx` | Thêm mới | Model ONNX chính thức từ OpenCV Zoo (`opencv/opencv_zoo`). Kích thước: 232,589 bytes (~227 KB).<br>**SHA-256:** `8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4`. | Mô hình phát hiện khuôn mặt học sâu siêu nhẹ (lightweight deep learning CNN), độ chính xác cao hơn vượt trội so với bộ lọc Haar truyền thống, hỗ trợ phát hiện khuôn mặt nghiêng/đa góc độ và 5 điểm mốc (landmarks). |
-| `models/yunet/LICENSE` | Thêm mới | Giấy phép bản quyền Apache-2.0 gốc của OpenCV Zoo. | Đảm bảo tuân thủ đầy đủ bản quyền mã nguồn mở. |
+| `models/yunet/LICENSE` | Thêm mới | Giấy phép bản quyền MIT License gốc của mô hình YuNet (Copyright (c) 2020 Shiqi Yu) từ OpenCV Zoo (`models/face_detection_yunet/LICENSE`). | Đảm bảo tuân thủ chính xác bản quyền tác giả Shiqi Yu theo MIT License. |
 | `backend/app/core/config.py` | Chỉnh sửa | Bổ sung các cấu hình trong `Settings`: `face_detector` (mặc định `"yunet"`), `yunet_model_path` (mặc định trỏ đến `models/yunet/face_detection_yunet_2023mar.onnx`), `face_score_threshold` (mặc định `0.8`). | Cho phép cấu hình linh hoạt loại detector, đường dẫn mô hình và ngưỡng tin cậy khuôn mặt qua biến môi trường. |
 | `backend/.env.example` | Chỉnh sửa | Bổ sung các biến mẫu: `FACE_DETECTOR=yunet`, `YUNET_MODEL_PATH=models/yunet/face_detection_yunet_2023mar.onnx`, `FACE_SCORE_THRESHOLD=0.8`. | Hướng dẫn cấu hình môi trường chuẩn cho người vận hành. |
 | `backend/app/services/face_detector.py` | Chỉnh sửa | 1. Bổ sung trường `landmarks5: tuple[tuple[float, float], ...] \| None = None` vào `FaceDetection`.<br>2. Thêm hàm `clamp_box()` ép toạ độ bounding box luôn nằm trong biên ảnh `(0 <= x, y và x+w <= width, y+h <= height)`.<br>3. Triển khai `FaceDetector` dùng `cv2.FaceDetectorYN.create()`, gọi `setInputSize((width, height))` theo từng frame.<br>4. Cơ chế fallback: nếu file model không tồn tại hoặc lỗi khởi tạo, tự động fallback sang Haar cascade cũ và ghi log WARNING 1 lần.<br>5. Giữ nguyên 100% logic lọc candidate ROI, Laplacian sharpness quality score và các reason: `"no face detected"`, `"multiple faces in ROI"`, `"face outside ROI"`, `"face too small"`, `"image too blurry"`, `"ok"`. | Thay thế bộ nhận diện khuôn mặt cũ kỹ bằng mạng nơ-ron YuNet hiện đại, bảo vệ an toàn cho module PAD không bị lỗi văng box ngoài biên, đồng thời đảm bảo tính sẵn sàng cao với fallback tự động. |
@@ -164,4 +164,13 @@
    * Kết quả: **67 passed in 29.50s** (toàn bộ 56 bài test trước đó + 11 bài unit test mới cho T05 đều PASS 100%).
 2. **Kiểm thử trường hợp 2 người trong ROI:**
    * Sử dụng ảnh `two_people.jpg` ghép trong `scratchpad/work/`: detector trả về chính xác `reason = "multiple faces in ROI"`.
+
+### Rework T05: Đính Chính Giấy Phép Bản Quyền YuNet Sang MIT License (Shiqi Yu)
+
+* **Ngày thực hiện:** 03/11/2026
+* **Lý do kỹ thuật:** Thư mục gốc của kho chứa OpenCV Zoo sử dụng Apache-2.0, tuy nhiên mô hình cụ thể `face_detection_yunet` được phát triển bởi tác giả Shiqi Yu và áp dụng giấy phép bản quyền riêng là **MIT License** (`Copyright (c) 2020 Shiqi Yu <shiqi.yu@gmail.com>`).
+* **Hành động khắc phục:**
+  1. Tải chính xác tệp license gốc từ `https://raw.githubusercontent.com/opencv/opencv_zoo/main/models/face_detection_yunet/LICENSE` (1,085 bytes, SHA-256: `c83b8120c50ccbd4c4f96edf53141bdd566ebb8f8e9227e415326aa1b1aba958`) và ghi đè vào `models/yunet/LICENSE` (so sánh byte khớp 100%).
+  2. Sửa toàn bộ tài liệu mô tả giấy phép của YuNet sang MIT License (Copyright (c) 2020 Shiqi Yu). Không thay đổi mã nguồn.
+
 
