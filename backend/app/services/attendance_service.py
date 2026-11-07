@@ -5,7 +5,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
-from app.models import Attendance, AttendanceSession, Student
+from app.models import Attendance, AttendanceSession, ClassSchedule, Student
 from app.models.school import DeviceConfig, FaceReference
 
 
@@ -33,7 +33,11 @@ def record_attendance(db, session, student, *, device_id, verification):
         db.commit()
         return existing, False
     now = datetime.now(timezone.utc)
-    start = session.starts_at.replace(tzinfo=timezone.utc) if session.starts_at else now
+    schedule = db.scalar(select(ClassSchedule).where(ClassSchedule.session_id == session_id))
+    if schedule is not None and schedule.start_at is not None:
+        start = schedule.start_at.replace(tzinfo=timezone.utc) if schedule.start_at.tzinfo is None else schedule.start_at
+    else:
+        start = session.starts_at.replace(tzinfo=timezone.utc) if session.starts_at else now
     row = Attendance(session_id=session_id, student_id=student_id, checked_at=now,
                      status="late" if now > start + timedelta(minutes=settings.late_after_minutes) else "present",
                      device_id=device_id, verification=verification)
