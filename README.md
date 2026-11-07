@@ -49,7 +49,7 @@ Chi tiết các luồng xử lý và giao thức truyền tải xem tại [docs/
    ```
    Hệ thống tự nạp danh sách 36 sinh viên vào `data/attendance.db` nếu chưa có cơ sở dữ liệu.
 4. Truy cập giao diện:
-   - Giao diện Kiosk và quản trị: `http://localhost:8000` (tài khoản `admin`, mật khẩu trong `.env`, mặc định `admin123456`).
+   - Giao diện Kiosk và quản trị: `http://localhost:8000` (tài khoản `admin`, mật khẩu trong `.env`, mặc định `admin123456` chỉ dùng khi chạy thử trên máy cá nhân).
    - Tài liệu API Swagger: `http://localhost:8000/docs`.
 5. Kết nối camera:
    - Qua Web UI: Vào tab Thiết bị & vùng điểm danh, chọn bật camera laptop hoặc ESP32-CAM.
@@ -66,9 +66,13 @@ Các tham số được nạp từ file `.env`, định nghĩa tại `backend/ap
 
 | Biến | Mặc định | Vai trò |
 |---|---|---|
+| `APP_ENV` | `development` | Môi trường triển khai (`development` hoặc `production`). Khi đặt `production`, server từ chối chạy nếu còn dùng mật khẩu hoặc token mặc định. |
+| `ENABLE_API_DOCS` | `true` | Bật hoặc tắt tài liệu API Swagger/ReDoc (mặc định tự tắt khi `APP_ENV=production`). |
 | `SECRET_KEY` | sinh tạm khi trống | Ký token đăng nhập HMAC; cần đặt cố định để token còn hiệu lực sau khi khởi động lại. |
 | `DEVICE_TOKEN` | `esp32_device_secret_token_ptit` | Xác thực camera bridge và ESP32 gửi dữ liệu về backend. Đổi khi triển khai. |
-| `ADMIN_PASSWORD` | `admin123456` | Mật khẩu đăng nhập quản trị viên trên giao diện web. Đổi khi triển khai. |
+| `ADMIN_PASSWORD` | `admin123456` | Mật khẩu đăng nhập quản trị viên trên giao diện web (mặc định chỉ dùng khi chạy thử trên máy cá nhân). Đổi khi triển khai. |
+| `ADMIN_PASSWORD_HASH` | trống | Chuỗi hash PBKDF2 của mật khẩu admin; nếu đặt sẽ ưu tiên kiểm tra thay cho `ADMIN_PASSWORD` dạng rõ. |
+| `LOGIN_MAX_ATTEMPTS` | `5` | Số lần thử đăng nhập sai tối đa trước khi tạm khóa 15 phút. |
 | `PAD_REAL_THRESHOLD` | `0.45` | Điểm MiniFASNet tối thiểu để coi là khuôn mặt thật. |
 | `RECOGNITION_THRESHOLD` | `0.52` | Ngưỡng khoảng cách Euclid để chấp nhận khớp khuôn mặt. |
 | `RECOGNITION_MARGIN` | `0.05` | Chênh lệch khoảng cách tối thiểu giữa hai ứng viên gần nhất. |
@@ -89,13 +93,29 @@ Firmware `firmware/esp32_cam_softap/` phục vụ ảnh chụp và trạng thái
 | Mặt lạ hoặc hai ứng viên quá gần | Ngưỡng 0.52 + margin 0.05 | test_pipeline.py::test_match_threshold_and_margin |
 | Điểm danh lặp lại | Ràng buộc một bản ghi/phiên | test_api.py::test_manual_attendance_duplicate_csv_and_close |
 
+## Nhập/xuất dữ liệu
+
+Hệ thống hỗ trợ nhập và xuất danh sách sinh viên cùng lịch học theo các định dạng CSV, XLSX (Excel) và iCalendar (.ics cho Google Calendar/Outlook). Thao tác nhập có bước xem trước, hiển thị rõ số dòng hợp lệ và chi tiết từng dòng lỗi trước khi ghi vào cơ sở dữ liệu. Mọi ô chuỗi xuất ra đều được lọc ký tự đặc biệt để chống lỗi Formula Injection trong Excel. Chi tiết và file mẫu xem tại [docs/import-export.md](docs/import-export.md).
+
+## Bảo mật
+
+| Biện pháp | Cơ chế thực hiện | Mục đích |
+|---|---|---|
+| Băm mật khẩu | PBKDF2-HMAC-SHA256 (600.000 vòng) | Bảo vệ thông tin xác thực quản trị viên, chống lộ mật khẩu dạng rõ |
+| Giới hạn thử sai | Bộ đếm trong RAM theo IP + tài khoản | Chặn tấn công dò mật khẩu (trả về mã 429 sau 5 lần sai) |
+| Thu hồi phiên | Mã định danh token ngẫu nhiên (jti) | Hỗ trợ đăng xuất và vô hiệu hóa token ngay lập tức trên máy chủ |
+| Header an toàn | CSP, X-Frame-Options, nosniff, no-store | Chống tấn công clickjacking, MIME sniffing và lưu cache dữ liệu nhạy cảm |
+| Khóa cấu hình | Kiểm tra tham số an toàn khi khởi động | Từ chối chạy môi trường production nếu còn để lộ mật khẩu hoặc token mặc định |
+
+Chi tiết các biện pháp và hướng dẫn kiểm tra xem tại [docs/security.md](docs/security.md).
+
 ## Kiểm thử
 
 ```bash
 PYTHONPATH=backend pytest backend/tests -q
 ```
 
-97 passed; E2E 14/14 bước. Chi tiết: [docs/test-report.md](docs/test-report.md).
+176 passed; E2E 14/14 bước. Chi tiết: [docs/test-report.md](docs/test-report.md).
 
 ## Tài liệu
 
@@ -106,3 +126,5 @@ PYTHONPATH=backend pytest backend/tests -q
 - [Đánh giá mô hình](docs/model-evaluation.md)
 - [Kiểm thử](docs/test-report.md)
 - [Kịch bản thuyết trình](docs/thuyet-trinh.md)
+- [Nhập/xuất dữ liệu](docs/import-export.md)
+- [Bảo mật hệ thống](docs/security.md)

@@ -25,7 +25,7 @@ fi
 echo "[2/3] Đang khởi chạy FastAPI Server tại cổng 8000..."
 echo "  -> Dashboard & Kiosk Web UI: http://localhost:8000"
 echo "  -> Swagger API Docs:        http://localhost:8000/docs"
-echo "  -> Tài khoản quản trị:       admin / admin123456"
+echo "  -> Tài khoản quản trị:       admin / mật khẩu đặt trong .env (ADMIN_PASSWORD)"
 echo "=========================================================================="
 echo "LƯU Ý KẾT NỐI CAMERA:"
 echo "  - Để dùng Camera ESP32-CAM: Mở thêm 1 terminal chạy: ./start_esp32.sh"

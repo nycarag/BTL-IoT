@@ -12,10 +12,15 @@ services:
     environment:
       DATABASE_URL: sqlite:////app/var/attendance.db
       ATTENDANCE_DATA_DIR: /app/var
+      APP_ENV: ${APP_ENV:-production}
+      ENABLE_API_DOCS: ${ENABLE_API_DOCS:-false}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Create .env and set ADMIN_PASSWORD}
-      SECRET_KEY: ${SECRET_KEY:-}
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:-}
+      SECRET_KEY: ${SECRET_KEY:?Create .env and set SECRET_KEY}
       DEVICE_TOKEN: ${DEVICE_TOKEN:?Create .env and set DEVICE_TOKEN}
+      TOKEN_TTL_HOURS: ${TOKEN_TTL_HOURS:-8}
+      LOGIN_MAX_ATTEMPTS: ${LOGIN_MAX_ATTEMPTS:-5}
       FACE_DETECTOR: ${FACE_DETECTOR:-yunet}
       PAD_MODEL_PATH: /app/models/minifasnet-v2/MiniFASNetV2.onnx
       PAD_REAL_THRESHOLD: ${PAD_REAL_THRESHOLD:-0.45}

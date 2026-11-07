@@ -76,3 +76,33 @@ Mã sinh viên,Họ và tên,Thời gian,Trạng thái,Phương thức,Thiết b
 SV_OBAMA,Barack Obama,2026-11-03 13:15:47,present,"face+pad:0.9999;distance:0.5001",esp32-cam-e2e
 SV_BIDEN,Joe Biden,2026-11-03 13:15:48,present,"face+pad:0.9999;distance:0.4102",esp32-cam-e2e
 ```
+
+---
+
+# Bổ sung 11/2026: nhập/xuất dữ liệu và bảo mật
+
+* **Thời điểm kiểm tra:** 07/11/2026.
+* **Môi trường:** Python 3.12.16 (virtualenv), FastAPI qua Uvicorn, SQLite database độc lập tại `/tmp/btl_scratch`.
+* **Kết quả bộ kiểm thử tự động (pytest):**
+  - Lệnh chạy: `PYTHONPATH=backend .venv/bin/python -m pytest backend/tests -q`
+  - Kết quả: **176 passed, 1 warning** trong 15.76s.
+  - So với baseline (97 passed): Toàn bộ 97 bài kiểm thử ban đầu giữ nguyên trạng thái pass, bổ sung 79 bài kiểm thử mới cho các tính năng bảo mật, kiểm toán, nhập/xuất bảng tính và lịch học.
+* **Biên dịch giao diện (Frontend):**
+  - Lệnh chạy: `cd frontend && npx tsc -p tsconfig.app.json --noEmit && npm run build`
+  - Kết quả: PASS, không phát sinh lỗi TypeScript. Bundle production đồng bộ hoàn toàn với mã nguồn.
+
+### Bảng kết quả kiểm tra trực tiếp qua HTTP REST và Socket (cổng 8011)
+
+| Kịch bản kiểm tra | Yêu cầu kỹ thuật | Kết quả thực tế | Mã HTTP | Đánh giá |
+|---|---|---|:---:|:---:|
+| **4a. Chống dò mật khẩu** | Đăng nhập sai liên tiếp 5 lần với cùng tên người dùng | 4 lần đầu trả 401; lần 5 trả 429 kèm tiêu đề `Retry-After: 900` | **429** | **PASS** |
+| **4b. Xem trước & áp dụng sinh viên** | Nạp `docs/samples/sinh_vien_mau.csv` chế độ preview rồi commit (`create_missing_classes=true`) | Trả về JSON tổng kết tạo 5 sinh viên, tự tạo lớp `D23CTAT01-B` | **200** | **PASS** |
+| **4b. Xuất bảng sinh viên** | Tải danh sách dạng XLSX và CSV | File XLSX đọc qua openpyxl có đủ 6 dòng (1 tiêu đề + 5 dòng sinh viên); file CSV có byte đầu `\xef\xbb\xbf` (BOM UTF-8) | **200** | **PASS** |
+| **4c. Nhập lịch học** | Nạp `docs/samples/lich_hoc_mau.csv` chế độ commit cho lớp đã tạo | Tạo thành công 6 bản ghi lịch học | **200** | **PASS** |
+| **4c. Xuất iCalendar & tạo buổi** | Tải lịch dạng `.ics`; gọi tạo buổi điểm danh từ lịch | `app.services.ics.parse_calendar` trích xuất đúng 6 sự kiện giờ Việt Nam (ICT); tạo phiên điểm danh mới ID=1 ở trạng thái `draft` | **200 / 201** | **PASS** |
+| **4d. Tiêu đề bảo mật HTTP** | Kiểm tra tiêu đề tại `GET /` và `GET /api/students` | Trang chủ có `Content-Security-Policy` và `X-Frame-Options: DENY`; endpoint dữ liệu có `Cache-Control: no-store` | **200** | **PASS** |
+| **4e. Nhật ký quản trị** | Truy vấn danh sách kiểm toán tại `GET /api/audit-logs` | Ghi nhận đầy đủ 8 loại hành vi: `auth.login`, `auth.login_failed`, `auth.login_locked`, `students.import`, `students.export`, `schedules.import`, `schedules.export`, `schedules.create_session` | **200** | **PASS** |
+| **4f. Đăng xuất & thu hồi token** | Gọi `POST /api/auth/logout` và tái sử dụng token | Đăng xuất trả 204 No Content; dùng lại token bị từ chối truy cập | **204 / 401** | **PASS** |
+| **4g. Kiểm tra tệp rác & dung lượng** | Gửi tệp `.xlsx` hỏng cấu trúc và tệp dung lượng 3 MiB | Tệp hỏng trả lỗi tiếng Việt "Tệp Excel hỏng hoặc không đúng định dạng .xlsx" (máy chủ không crash); tệp vượt ngưỡng trả "Dung lượng tệp vượt quá 2 MiB" | **422 / 413** | **PASS** |
+| **4h. Chặn cấu hình yếu ở production** | Chạy ứng dụng với `APP_ENV=production` và tham số mặc định | Máy chủ phát sinh `RuntimeError` cảnh báo secret/mật khẩu yếu và dừng khởi động | **N/A (Chặn khởi động)** | **PASS** |
+
