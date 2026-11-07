@@ -24,7 +24,7 @@ fi
 
 # 2. Khởi chạy Backend FastAPI ngầm
 echo "[2/4] Đang khởi chạy Máy chủ FastAPI tại cổng 8000..."
-python3 -m uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8000 >/dev/null 2>&1 &
+python3 -m uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8000 > /tmp/btl_backend.log 2>&1 &
 BACKEND_PID=$!
 
 cleanup() {
@@ -36,12 +36,21 @@ trap cleanup SIGINT SIGTERM EXIT
 
 # 3. Đợi backend sẵn sàng & mở trình duyệt
 echo "[3/4] Đang mở giao diện Kiosk trên trình duyệt..."
+READY=false
 for i in {1..20}; do
     if curl -s http://127.0.0.1:8000/health >/dev/null; then
+        READY=true
         break
     fi
     sleep 0.3
 done
+
+if [ "$READY" = "false" ]; then
+    echo "CẢNH BÁO: Máy chủ backend chưa phản hồi tại http://localhost:8000."
+    if [ -f "/tmp/btl_backend.log" ]; then
+        cat /tmp/btl_backend.log | tail -n 10
+    fi
+fi
 
 # Mở trình duyệt vào Dashboard / Kiosk
 xdg-open "http://localhost:8000" >/dev/null 2>&1 &
