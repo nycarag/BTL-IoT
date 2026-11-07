@@ -6,6 +6,10 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+if [ -d ".venv" ]; then
+    source .venv/bin/activate
+fi
+
 echo "=========================================================================="
 echo ">>> KHỞI ĐỘNG HỆ THỐNG ĐIỂM DANH SINH VIÊN AIoT (NHÓM 05 - PTIT) <<<"
 echo "=========================================================================="
