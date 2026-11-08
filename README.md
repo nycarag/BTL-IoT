@@ -13,24 +13,33 @@ Hệ thống điểm danh sinh viên tự động thu nhận hình ảnh từ ES
 | Giảng viên hướng dẫn | TS. Lê Văn Vịnh |
 | Thành viên thực hiện | Đỗ Trung Kiên (B23DCAT156), Nguyễn Đăng Khoa (B23DCAT153), Hoàng Hoàng Tuấn (B23DCAT320) |
 
-## Kiến trúc hệ thống
+## Kiến trúc & Ngăn xếp Công nghệ (Tech Stack)
 
 ```text
-ESP32-CAM / Webcam ──(HTTP MJPEG/JPEG)──> Camera Bridge ──(HTTP/WS)──> FastAPI Backend
-                                                                           │
-               ┌───────────────────────────────────────────────────────────┤
-               ▼                                                           ▼
-Pipeline AI (YuNet, MiniFASNet, dlib)                     SQLite / Web Audio / React Kiosk
+[Thiết bị IoT / Camera] ──(HTTP MJPEG)──> [Camera Bridge] ──(HTTP/WS)──> [FastAPI Backend]
+ESP32-CAM / Webcam                        Python / LatestFrame           Python 3.12 / ASGI
+                                                                                 │
+               ┌─────────────────────────────────────────────────────────────────┤
+               ▼                                                                 ▼
+      [Pipeline AI 4 chặng]                                            [Lưu trữ & Giao diện]
+YuNet ➔ Stability ➔ MiniFASNet ➔ dlib                            SQLite / WebSockets / React TS
 ```
 
+| Tầng hệ thống | Công nghệ sử dụng | Vai trò & Đặc điểm chính |
+| :--- | :--- | :--- |
+| **Frontend (FE)** | React 18, TypeScript, Vite, CSS thuần | Giao diện Kiosk & Quản trị. Vẽ khung mặt Canvas client-side, Web Audio phát tiếng beep, WebSocket nhận diện realtime. |
+| **Backend (BE)** | FastAPI (Python 3.12), Uvicorn, Pydantic | API async hiệu năng cao. Xác thực PBKDF2 (100k rounds), JWT có JTI revoke, middleware bảo mật pure ASGI, rate-limiting. |
+| **Cơ sở dữ liệu (DB)** | SQLite 3, SQLAlchemy 2.0 ORM | Nhẹ, nhúng trực tiếp, write-lock `BEGIN IMMEDIATE`. Lưu vector 128D dạng JSON, so khớp Euclid cực nhanh qua NumPy. |
+| **IoT & Edge Camera** | ESP32-CAM (AI-Thinker OV2640), C++ FreeRTOS | Tách cổng 80 (Snapshot/Lệnh) & 81 (Stream MJPEG). Cầu nối `camera_bridge.py` đệm khung hình mới nhất chống trôi trễ. |
+
+## Pipeline nhận diện khuôn mặt (4 chặng nối tiếp)
+
+1. **Phát hiện khuôn mặt**: **YuNet** (ONNX, OpenCV DNN) — Tìm bounding box $[x, y, w, h]$ và 5 mốc điểm (~15ms trên CPU). Tự động fallback sang Haar cascade nếu thiếu file.
+2. **Lọc ổn định (Stability)**: Kiểm tra IoU qua $\ge 3$ khung hình liên tiếp trong vùng ROI để loại trừ rung lắc hoặc người đi lướt qua.
+3. **Chống giả mạo (PAD)**: **MiniFASNetV2** (ONNX Runtime) — Phân tích vân ảnh/ánh sáng phân biệt người thật vs ảnh in/màn hình điện thoại (ngưỡng pass $\ge 0.45$). Có tùy chọn Active Liveness (chớp mắt EAR qua dlib 68 landmarks).
+4. **Nhận diện danh tính**: **ResNet-34 128D (dlib)** — Trích xuất vector 128 chiều thô, so khớp khoảng cách Euclid với mẫu sinh viên của lớp (ngưỡng $\le 0.52$, margin chênh lệch với người thứ hai $\ge 0.05$).
+
 Chi tiết các luồng xử lý và giao thức truyền tải xem tại [docs/architecture.md](docs/architecture.md).
-
-## Pipeline nhận diện
-
-- Phát hiện khuôn mặt: YuNet (ngưỡng điểm 0.8, diện tích tối thiểu 0.03, độ nét Laplacian 20, ROI mặc định 0.22–0.78 ngang và 0.15–0.85 dọc), tự động chuyển sang Haar cascade khi thiếu file mô hình hoặc nạp lỗi.
-- Chống giả mạo (PAD): MiniFASNetV2 ONNX tensor `(1, 3, 80, 80)`, mở rộng vùng cắt tỉ lệ 2.7 kèm dịch chuyển hộp vào trong biên ảnh, ngưỡng phân loại khuôn mặt thật 0.45.
-- Kiểm tra chớp mắt (Active Liveness): Thuật toán EAR với dlib 68 mốc điểm chạy trên luồng preview (tối đa 10.0 Hz), ngưỡng nhắm mắt thích ứng bằng 0.75 trung vị 3 giây gần nhất, hiệu lực trong 5.0 giây và xóa dấu vết ngay sau khi ghi nhận.
-- Nhận diện khuôn mặt: Mô hình dlib trích xuất vector 128 chiều thô (không chuẩn hóa L2), hỗ trợ 1–5 ảnh mẫu mỗi sinh viên, so khớp khoảng cách Euclid với ngưỡng chấp nhận 0.52 và khoảng cách an toàn giữa hai ứng viên tối thiểu 0.05.
 
 ## Cài đặt và khởi chạy
 
