@@ -38,12 +38,36 @@ echo "URL Camera đang sử dụng:"
 echo "  - Chụp ảnh (Capture): $CAMERA_CAPTURE_URL"
 echo "  - Luồng video (Stream): $CAMERA_STREAM_URL"
 
-# Tự động gửi lệnh tối ưu siêu mượt (QVGA 320x240 + Quality 16) qua API /control
+# Tinh chỉnh thêm cho cảm biến (không cần nạp lại firmware), đọc từ .env nếu chưa đặt.
+# Ví dụ: CAMERA_CONTROL_EXTRA="aec2=0 gainceiling=4"
+if [ -z "${CAMERA_CONTROL_EXTRA:-}" ] && [ -f "$SCRIPT_DIR/.env" ]; then
+    CAMERA_CONTROL_EXTRA=$(grep -E '^\s*CAMERA_CONTROL_EXTRA=' "$SCRIPT_DIR/.env" | tail -n1 | cut -d'=' -f2- | tr -d '"'"'" || true)
+fi
+
 CAM_IP=$(echo "$CAMERA_CAPTURE_URL" | sed -E 's|https?://([^:/]+).*|\1|')
 if [ -n "$CAM_IP" ]; then
-    echo "-> Đang áp cấu hình siêu mượt (QVGA 320x240, Quality 16) tới camera..."
-    curl -s -m 2 "http://${CAM_IP}/control?var=framesize&val=QVGA" >/dev/null 2>&1 || true
-    curl -s -m 2 "http://${CAM_IP}/control?var=quality&val=16" >/dev/null 2>&1 || true
+    # IP do hotspot cấp có thể đổi giữa các lần bật. Kiểm tra trước, để lỗi hiện ra rõ ràng
+    # thay vì cầu nối lặp mãi dòng "Camera read failed".
+    if curl -s -m 3 "http://${CAM_IP}/status" 2>/dev/null | grep -q '"wifi_mode"'; then
+        echo "-> Camera trả lời ở ${CAM_IP}. Đang áp cấu hình siêu mượt (QVGA 320x240, Quality 16)..."
+        curl -s -m 2 "http://${CAM_IP}/control?var=framesize&val=QVGA" >/dev/null 2>&1 || true
+        curl -s -m 2 "http://${CAM_IP}/control?var=quality&val=16" >/dev/null 2>&1 || true
+        for pair in ${CAMERA_CONTROL_EXTRA:-}; do
+            if curl -sf -m 2 "http://${CAM_IP}/control?var=${pair%%=*}&val=${pair#*=}" >/dev/null 2>&1; then
+                echo "   + đã áp ${pair}"
+            else
+                echo "   ! camera từ chối ${pair}"
+            fi
+        done
+    else
+        echo "=========================================================================="
+        echo "CẢNH BÁO: camera không trả lời ở ${CAM_IP}."
+        echo "  1. Kiểm tra camera đã có điện và điện thoại đang bật hotspot."
+        echo "  2. IP có thể đã đổi: trên Windows chạy  ping esp32cam.local  để lấy IP mới,"
+        echo "     rồi sửa hai dòng CAMERA_CAPTURE_URL và CAMERA_STREAM_URL trong file .env."
+        echo "Cầu nối vẫn chạy và sẽ tự nối lại khi camera lên."
+        echo "=========================================================================="
+    fi
 fi
 
 cd "$SCRIPT_DIR/backend"

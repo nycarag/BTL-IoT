@@ -4,6 +4,7 @@ import asyncio
 from contextlib import asynccontextmanager
 import logging
 import os
+import threading
 from typing import Any
 
 from fastapi import FastAPI
@@ -28,6 +29,7 @@ from app.core.middleware import install_security_headers
 from app.database import init_db
 from app.services.auto_session import run_forever
 from app.services.bridge_control import bridge
+from app.services.face_recognition import prepare_encoder, shutdown_encoder
 
 DEFAULT_DEVICE_TOKEN = "esp32_device_secret_token_ptit"
 DEFAULT_ADMIN_PASSWORD = "admin123456"
@@ -88,6 +90,10 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(application):
         init_db()
+        if settings.recognition_process:
+            # Tiến trình con trích vector mất vài giây để nạp dlib. Khởi động từ lúc bật app,
+            # trong luồng riêng, để sinh viên đầu tiên của ca không phải chờ.
+            threading.Thread(target=lambda: prepare_encoder(attendance._recognizer()), daemon=True).start()
         task = None
         if settings.auto_session_enabled:
             task = asyncio.create_task(run_forever())
@@ -100,6 +106,7 @@ def create_app() -> FastAPI:
                     await task
                 except asyncio.CancelledError:
                     pass
+            shutdown_encoder()
             bridge.stop()
 
     application = FastAPI(

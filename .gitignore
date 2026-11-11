@@ -21,5 +21,7 @@ venv/
 ENV/
 node_modules/
 *.db
+*.db-wal
+*.db-shm
 firmware/**/config.h
 

@@ -35,7 +35,12 @@ interface SchedulePanelProps {
   apiUrl: string;
   token: string;
   classes: { id: number; code: string; name: string }[];
-  onSessionCreated: (sessionId: number) => void;
+  /** Chuỗi "id:trạng thái" của mọi buổi. Đổi thì tải lại, để huy hiệu trên dòng lịch không bị cũ. */
+  sessionsKey: string;
+  /** Xem buổi đã chọn ở Bảng quản trị. */
+  onViewSession: (sessionId: number) => void;
+  /** Ca vừa mở: chuyển sang Kiosk với buổi đó. */
+  onSessionOpened: (sessionId: number) => void;
 }
 
 function toDateString(d: Date): string {
@@ -43,6 +48,22 @@ function toDateString(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+/** Giờ mặc định của form: bắt đầu từ phút hiện tại, dài 2 giờ, không vượt quá 23:59. */
+function defaultTimes(): { start: string; end: string } {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const start = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  const end = now.getHours() + 2 > 23 ? "23:59" : `${pad(now.getHours() + 2)}:${pad(now.getMinutes())}`;
+  return { start, end };
+}
+
+/** Buổi học đang ở đâu so với đồng hồ máy này. Ngày giờ của lịch là giờ Việt Nam. */
+function schedulePhase(item: { date: string; start_time: string; end_time: string }): "upcoming" | "ongoing" | "ended" {
+  const now = Date.now();
+  if (now >= new Date(`${item.date}T${item.end_time}:00`).getTime()) return "ended";
+  return now >= new Date(`${item.date}T${item.start_time}:00`).getTime() ? "ongoing" : "upcoming";
 }
 
 function getDefaultDateRange(): { from: string; to: string } {
@@ -108,8 +129,8 @@ export default function SchedulePanel(props: SchedulePanelProps) {
   const [editingClassId, setEditingClassId] = useState<number | null>(null);
   const [formTitle, setFormTitle] = useState<string>("");
   const [formDate, setFormDate] = useState<string>(toDateString(new Date()));
-  const [formStartTime, setFormStartTime] = useState<string>("07:00");
-  const [formEndTime, setFormEndTime] = useState<string>("09:00");
+  const [formStartTime, setFormStartTime] = useState<string>(() => defaultTimes().start);
+  const [formEndTime, setFormEndTime] = useState<string>(() => defaultTimes().end);
   const [formRoom, setFormRoom] = useState<string>("");
   const [formNote, setFormNote] = useState<string>("");
 
@@ -143,9 +164,10 @@ export default function SchedulePanel(props: SchedulePanelProps) {
     }
   }, [props.api, classFilter, dateFrom, dateTo]);
 
+  // Tải lại cả khi trạng thái các buổi đổi (bộ hẹn giờ vừa mở hoặc đóng ca)
   useEffect(() => {
     void loadSchedules();
-  }, [loadSchedules]);
+  }, [loadSchedules, props.sessionsKey]);
 
   // Group schedules by date
   const groupedSchedules = useMemo(() => {
@@ -175,8 +197,9 @@ export default function SchedulePanel(props: SchedulePanelProps) {
     setEditingClassId(null);
     setFormTitle("");
     setFormDate(toDateString(new Date()));
-    setFormStartTime("07:00");
-    setFormEndTime("09:00");
+    const times = defaultTimes();
+    setFormStartTime(times.start);
+    setFormEndTime(times.end);
     setFormRoom("");
     setFormNote("");
     setError("");
@@ -228,8 +251,8 @@ export default function SchedulePanel(props: SchedulePanelProps) {
     }
   };
 
-  // Create session from schedule
-  const handleCreateSession = async (scheduleId: number) => {
+  // Mở điểm danh ngay cho một lịch: tạo ca nếu chưa có, mở ca, rồi chuyển sang Kiosk
+  const handleOpenNow = async (scheduleId: number) => {
     setError("");
     setNotice("");
     setBusy(true);
@@ -238,12 +261,18 @@ export default function SchedulePanel(props: SchedulePanelProps) {
         method: "POST",
       });
       const sessionData = (await res.json()) as { id: number; title: string; status: string };
-      setNotice(`Đã tạo buổi điểm danh #${sessionData.id} cho lịch học.`);
-      await loadSchedules();
-      props.onSessionCreated(sessionData.id);
+      if (sessionData.status === "closed") {
+        setError("Buổi điểm danh này đã đóng, không mở lại được.");
+        await loadSchedules();
+        return;
+      }
+      if (sessionData.status === "draft") {
+        await props.api(`/sessions/${sessionData.id}/start`, { method: "POST" });
+      }
+      props.onSessionOpened(sessionData.id);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      setError(msg || "Không thể tạo buổi điểm danh");
+      setError(msg || "Không thể mở điểm danh");
     } finally {
       setBusy(false);
     }
@@ -283,23 +312,37 @@ export default function SchedulePanel(props: SchedulePanelProps) {
 
     setBusy(true);
     try {
+      let saved: ScheduleItem;
       if (editingId) {
-        await props.api(`/schedules/${editingId}`, {
+        const res = await props.api(`/schedules/${editingId}`, {
           method: "PUT",
           body: JSON.stringify(payload),
         });
-        setNotice(`Đã cập nhật lịch học #${editingId}.`);
+        saved = (await res.json()) as ScheduleItem;
         handleCancelEdit();
       } else {
-        await props.api("/schedules", {
+        const res = await props.api("/schedules", {
           method: "POST",
           body: JSON.stringify(payload),
         });
-        setNotice("Đã thêm lịch học mới thành công.");
+        saved = (await res.json()) as ScheduleItem;
         setFormTitle("");
         setFormRoom("");
         setFormNote("");
       }
+      // Lịch đang trong giờ học: server đã mở ca ngay khi lưu, chuyển thẳng sang Kiosk
+      if (saved.session_status === "open" && saved.session_id) {
+        props.onSessionOpened(saved.session_id);
+        return;
+      }
+      const phase = schedulePhase(saved);
+      setNotice(
+        phase === "upcoming"
+          ? `Đã lưu lịch học. Ca điểm danh sẽ tự mở lúc ${saved.start_time} ngày ${saved.date.split("-").reverse().join("/")}.`
+          : phase === "ended"
+            ? "Đã lưu lịch học. Buổi này đã qua nên không mở ca điểm danh."
+            : "Đã lưu lịch học."
+      );
       await loadSchedules();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -464,7 +507,7 @@ export default function SchedulePanel(props: SchedulePanelProps) {
   return (
     <div>
       <p className="muted" style={{ margin: "0 0 16px 0", fontSize: "0.85rem" }}>
-        Ca điểm danh tự mở lúc bắt đầu và tự đóng lúc kết thúc buổi học. Đóng ca thì sinh viên chưa điểm danh bị ghi vắng.
+        Ca điểm danh tự mở lúc bắt đầu và tự đóng lúc kết thúc buổi học; lịch đang trong giờ thì ca mở ngay khi lưu. Đóng ca thì sinh viên chưa điểm danh bị ghi vắng.
       </p>
 
       {/* Thông báo trạng thái */}
@@ -960,22 +1003,31 @@ export default function SchedulePanel(props: SchedulePanelProps) {
                             Xóa
                           </button>
 
-                          {s.session_id ? (
+                          {s.session_status === "open" ? (
+                            <button type="button" disabled={busy} onClick={() => props.onSessionOpened(s.session_id!)}>
+                              Vào Kiosk
+                            </button>
+                          ) : s.session_status === "closed" ? (
                             <button
                               type="button"
                               className="secondary"
                               disabled={busy}
-                              onClick={() => props.onSessionCreated(s.session_id!)}
+                              onClick={() => props.onViewSession(s.session_id!)}
                             >
                               Xem buổi
                             </button>
                           ) : (
                             <button
                               type="button"
-                              disabled={busy}
-                              onClick={() => handleCreateSession(s.id)}
+                              disabled={busy || schedulePhase(s) === "ended"}
+                              title={
+                                schedulePhase(s) === "ended"
+                                  ? "Buổi học đã kết thúc"
+                                  : "Tạo ca nếu chưa có, mở điểm danh và chuyển sang Kiosk"
+                              }
+                              onClick={() => handleOpenNow(s.id)}
                             >
-                              Tạo buổi điểm danh
+                              Mở điểm danh ngay
                             </button>
                           )}
                         </div>

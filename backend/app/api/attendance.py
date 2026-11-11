@@ -19,7 +19,7 @@ from app.schemas import AttendanceResponse, LivenessEventResponse
 from app.schemas.api import ManualAttendance
 from app.services.antispoof import AntiSpoofAdapter
 from app.services.face_detector import FaceDetector
-from app.services.face_recognition import FaceRecognitionAdapter, match
+from app.services.face_recognition import FaceRecognitionAdapter, encode_off_loop, match, prepare_encoder
 from app.services.attendance_service import record_attendance
 from app.services import session_lifecycle
 from app.services.stability import gate
@@ -101,6 +101,7 @@ async def _process_frame(device_id, image, session_id, db):
         gate.reset((device_id, session_id))
         await event(db, session_id if session else None, device_id, "rejected", "Session is not open")
         raise HTTPException(409, "Attendance session is not open")
+    prepare_encoder(_recognizer())
     now = time.monotonic()
     if now - last_frames.get(device_id, -100) < settings.frame_interval_seconds:
         raise HTTPException(429, "Frame rate exceeded", headers={"Retry-After": "1"})
@@ -162,7 +163,7 @@ async def _process_frame(device_id, image, session_id, db):
         if not getattr(rec, "ready", False):
             recognition = None
         else:
-            probe = await run_in_threadpool(rec.encode, frame, detection.box)
+            probe = await encode_off_loop(rec, frame, detection.box)
             rows = db.execute(
                 select(FaceReference, Student).join(Student, Student.id == FaceReference.student_id)
                 .where(Student.class_id == session.class_id)

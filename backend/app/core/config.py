@@ -66,6 +66,7 @@ class Settings:
     liveness_window_s: float = float(os.getenv("LIVENESS_WINDOW_S", "5.0"))
     liveness_max_hz: float = float(os.getenv("LIVENESS_MAX_HZ", "10.0"))
     recognition_calibrated: bool = os.getenv("RECOGNITION_CALIBRATED", "true").lower() == "true"
+    recognition_process: bool = os.getenv("RECOGNITION_PROCESS", "true").lower().strip() not in ("0", "false", "no")
     pad_calibrated: bool = os.getenv("PAD_CALIBRATED", "true").lower() == "true"
     default_camera_url: str = os.getenv("CAMERA_CAPTURE_URL", "http://192.168.4.1/capture")
     bridge_device_id: str = os.getenv("CAMERA_DEVICE_ID", "esp32-cam-01")

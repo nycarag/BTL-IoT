@@ -242,7 +242,7 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
             <span className="kiosk-badge-school">HỌC VIỆN CÔNG NGHỆ BƯU CHÍNH VIỄN THÔNG (PTIT)</span>
             {currentSession && (
               <span className={`kiosk-session-badge ${currentSession.status}`}>
-                {currentSession.status === "open" ? "● ĐANG MỞ ĐIỂM DANH" : "🔒 ĐÃ ĐÓNG PHIÊN"}
+                {currentSession.status === "open" ? "● ĐANG MỞ ĐIỂM DANH" : currentSession.status === "draft" ? "⏳ CHƯA MỞ ĐIỂM DANH" : "🔒 ĐÃ ĐÓNG PHIÊN"}
               </span>
             )}
             {onSelectSession && sessions.length > 1 && (
@@ -255,7 +255,7 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
                 >
                   {sessions.map(s => (
                     <option key={s.id} value={s.id}>
-                      #{s.id} {s.title} ({s.status === "open" ? "Đang mở" : "Đã đóng"})
+                      #{s.id} {s.title} ({s.status === "open" ? "Đang mở" : s.status === "draft" ? "Chưa mở" : "Đã đóng"})
                     </option>
                   ))}
                 </select>

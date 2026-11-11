@@ -15,7 +15,9 @@ from app.models.school import AttendanceSession, ClassSchedule
 from app.services import session_lifecycle
 from app.services.websocket import manager
 
-logger = logging.getLogger(__name__)
+# Dùng logger của uvicorn vì nó có sẵn handler mức INFO: các dòng mở/đóng ca hiện trong log chạy app.
+# logging.getLogger(__name__) không có handler nào nên mọi dòng INFO bị bỏ.
+logger = logging.getLogger("uvicorn.error")
 
 
 def _to_utc(dt: datetime) -> datetime:
@@ -56,7 +58,9 @@ def tick(db: Session, now: datetime) -> list[tuple[int, str]]:
                     db.execute(text("BEGIN IMMEDIATE"))
                 sess = db.get(AttendanceSession, sched.session_id)
                 if sess and sess.status == "open":
-                    session_lifecycle.close_session(db, sess, now_utc)
+                    # Ghi giờ kết thúc theo lịch: máy bật lại muộn thì giờ đóng ca và giờ ghi vắng
+                    # vẫn là lúc hết buổi học, không phải lúc bật máy.
+                    session_lifecycle.close_session(db, sess, end_utc)
                     db.commit()
                     changed.append((sess.id, "closed"))
                 else:
@@ -110,7 +114,7 @@ async def run_forever() -> None:
             events = await asyncio.to_thread(_run_tick)
             for session_id, new_status in events:
                 logger.info("Auto-session: Buổi học #%s chuyển sang trạng thái '%s'", session_id, new_status)
-                await manager.broadcast(session_id, {"type": "session", "status": new_status})
+                await manager.broadcast_all({"type": "session", "status": new_status})
         except asyncio.CancelledError:
             logger.info("Tiến trình auto-session nhận tín hiệu dừng (Cancelled)")
             raise

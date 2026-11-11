@@ -33,5 +33,13 @@ class ConnectionManager:
                 except Exception:
                     pass
 
+    async def broadcast_all(self, message):
+        """Gửi cho mọi dashboard đang nối, bất kể đang xem buổi nào.
+
+        Ca vừa mở thì chưa ai theo dõi kênh của nó; gửi riêng theo buổi thì không màn hình nào biết.
+        """
+        for session_id in list(self.connections):
+            await self.broadcast(session_id, message)
+
 
 manager = ConnectionManager()

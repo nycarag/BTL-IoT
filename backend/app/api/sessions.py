@@ -53,12 +53,12 @@ def _set_status(session_id: int, target: str, db: Session) -> AttendanceSession:
 @router.post("/sessions/{session_id}/start", response_model=SessionResponse)
 async def start_session(session_id: int, _: str = Depends(verify_token), db: Session = Depends(get_db)):
     session = _set_status(session_id, "open", db)
-    await manager.broadcast(session_id, {"type": "session", "status": "open"})
+    await manager.broadcast_all({"type": "session", "status": "open"})
     return session
 
 
 @router.post("/sessions/{session_id}/close", response_model=SessionResponse)
 async def close_session(session_id: int, _: str = Depends(verify_token), db: Session = Depends(get_db)):
     session = _set_status(session_id, "closed", db)
-    await manager.broadcast(session_id, {"type": "session", "status": "closed"})
+    await manager.broadcast_all({"type": "session", "status": "closed"})
     return session

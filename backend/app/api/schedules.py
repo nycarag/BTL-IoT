@@ -7,20 +7,34 @@ from pathlib import Path
 import re
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.security import verify_token
 from app.database import get_db
 from app.models.school import AttendanceSession, ClassRoom, ClassSchedule
 from app.schemas.api import SessionResponse
 from app.schemas.roster_io import ImportError as ScheduleImportError, ImportResult
 from app.schemas.schedule import ScheduleInput, ScheduleResponse
-from app.services import ics, tabular
+from app.services import auto_session, ics, tabular
 from app.services.audit import client_ip, log_action
 from app.services.tabular import normalize_header
+from app.services.websocket import manager
 
 router = APIRouter()
 
@@ -131,6 +145,28 @@ def _build_schedule_response(
     )
 
 
+def _run_auto_session_now(db: Session, background_tasks: BackgroundTasks) -> None:
+    """Chạy ngay một nhịp ca tự động sau khi lịch thay đổi.
+
+    Bộ hẹn giờ nền chỉ quét theo chu kỳ (mặc định 30 giây). Lịch vừa lưu mà đang trong giờ học
+    thì ca được mở luôn trong request này, người dùng không phải chờ nhịp kế tiếp.
+    """
+    if not settings.auto_session_enabled:
+        return
+    for session_id, new_status in auto_session.tick(db, datetime.now(timezone.utc)):
+        auto_session.logger.info("Auto-session: Buổi học #%s chuyển sang '%s' ngay khi lưu lịch", session_id, new_status)
+        background_tasks.add_task(manager.broadcast_all, {"type": "session", "status": new_status})
+
+
+def _linked_session_status(db: Session, schedule: ClassSchedule) -> str | None:
+    """Trạng thái ca gắn với lịch, đọc lại từ DB vì nhịp ca tự động có thể vừa tạo và mở ca."""
+    db.refresh(schedule)
+    if not schedule.session_id:
+        return None
+    sess = db.get(AttendanceSession, schedule.session_id)
+    return sess.status if sess else None
+
+
 @router.get("/schedules", response_model=list[ScheduleResponse])
 def list_schedules(
     class_id: int | None = Query(None),
@@ -167,6 +203,7 @@ def list_schedules(
 def create_schedule(
     payload: ScheduleInput,
     request: Request,
+    background_tasks: BackgroundTasks,
     username: str = Depends(verify_token),
     db: Session = Depends(get_db),
 ):
@@ -219,7 +256,8 @@ def create_schedule(
         ip_address=client_ip(request),
     )
 
-    return _build_schedule_response(schedule, classroom.code)
+    _run_auto_session_now(db, background_tasks)
+    return _build_schedule_response(schedule, classroom.code, _linked_session_status(db, schedule))
 
 
 @router.put("/schedules/{id}", response_model=ScheduleResponse)
@@ -227,6 +265,7 @@ def update_schedule(
     id: int,
     payload: ScheduleInput,
     request: Request,
+    background_tasks: BackgroundTasks,
     username: str = Depends(verify_token),
     db: Session = Depends(get_db),
 ):
@@ -274,11 +313,6 @@ def update_schedule(
     db.commit()
     db.refresh(schedule)
 
-    session_status = None
-    if schedule.session_id:
-        sess = db.get(AttendanceSession, schedule.session_id)
-        session_status = sess.status if sess else None
-
     log_action(
         db,
         username,
@@ -294,7 +328,8 @@ def update_schedule(
         ip_address=client_ip(request),
     )
 
-    return _build_schedule_response(schedule, classroom.code, session_status)
+    _run_auto_session_now(db, background_tasks)
+    return _build_schedule_response(schedule, classroom.code, _linked_session_status(db, schedule))
 
 
 @router.delete("/schedules/{id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -528,6 +563,7 @@ def get_import_template(
 @router.post("/schedules/import", response_model=ImportResult)
 async def import_schedules(
     request: Request,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     mode: str = Form("preview"),
     on_conflict: str = Form("skip"),
@@ -967,5 +1003,6 @@ async def import_schedules(
         except Exception:
             db.rollback()
             raise
+        _run_auto_session_now(db, background_tasks)
 
     return result
