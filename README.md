@@ -52,17 +52,17 @@ Chi tiết các luồng xử lý và giao thức truyền tải xem tại [docs/
    cp backend/.env.example .env
    ```
    Thiết lập các biến bắt buộc trong file `.env`: `ADMIN_PASSWORD`, `DEVICE_TOKEN`, và `SECRET_KEY` (chuỗi ngẫu nhiên tối thiểu 32 ký tự).
-3. Khởi chạy hệ thống:
+3. Khởi chạy hệ thống 1-Click:
    ```bash
-   ./start.sh
+   ./run_one_click.sh
    ```
-   Hệ thống tự nạp danh sách 36 sinh viên vào `data/attendance.db` nếu chưa có cơ sở dữ liệu.
+   Hệ thống tự động kích hoạt môi trường ảo, khởi chạy backend FastAPI tại cổng 8000, mở trình duyệt vào giao diện Kiosk và cho phép chọn nguồn camera (ESP32-CAM hoặc Webcam laptop).
 4. Truy cập giao diện:
    - Giao diện Kiosk và quản trị: `http://localhost:8000` (tài khoản `admin`, mật khẩu trong `.env`, mặc định `admin123456` chỉ dùng khi chạy thử trên máy cá nhân).
    - Tài liệu API Swagger: `http://localhost:8000/docs`.
 5. Kết nối camera:
    - Qua Web UI: Vào tab Thiết bị & vùng điểm danh, chọn bật camera laptop hoặc ESP32-CAM.
-   - Qua terminal riêng: Chạy `./start_webcam.sh` để dùng webcam laptop, hoặc kết nối Wi-Fi SoftAP `ESP32_DIEM_DANH` bằng mật khẩu đã đặt trong `firmware/esp32_cam_softap/config.h` (tạo từ `config.example.h`), rồi chạy `./start_esp32.sh`.
+   - Qua script: Chạy `./start_esp32.sh` để kết nối ESP32-CAM qua Wi-Fi (tự động áp cấu hình QVGA + Quality 16 siêu mượt), hoặc chạy `./start_webcam.sh` để dùng webcam laptop.
 6. Chạy với Docker Compose:
    ```bash
    docker compose up --build -d
@@ -85,9 +85,11 @@ Các tham số được nạp từ file `.env`, định nghĩa tại `backend/ap
 | `PAD_REAL_THRESHOLD` | `0.45` | Điểm MiniFASNet tối thiểu để coi là khuôn mặt thật. |
 | `RECOGNITION_THRESHOLD` | `0.52` | Ngưỡng khoảng cách Euclid để chấp nhận khớp khuôn mặt. |
 | `RECOGNITION_MARGIN` | `0.05` | Chênh lệch khoảng cách tối thiểu giữa hai ứng viên gần nhất. |
-| `LIVENESS_MODE` | `blink` | Kiểm tra chớp mắt (blink) hoặc tắt khi thử nghiệm (off). |
-| `STABLE_FRAMES` | `3` | Số khung hình ổn định liên tiếp trước khi nhận diện. |
-| `FRAME_INTERVAL_SECONDS` | `0.3` | Khoảng cách giữa hai khung hình; gửi quá nhanh nhận lỗi 429. |
+| `LIVENESS_MODE` | `passive` | Chế độ chống giả mạo: `passive` (chạy mô hình MiniFASNetV2 1-frame siêu mượt), `blink` (bắt chớp mắt EAR), hoặc `off`. |
+| `AUTO_SESSION_ENABLED` | `true` | Bật tiến trình nền tự động mở và đóng ca điểm danh theo lịch học. |
+| `LATE_AFTER_MINUTES` | `15` | Ngưỡng tính đi muộn (phút); có thể chỉnh động trực tiếp trên giao diện web. |
+| `STABLE_FRAMES` | `1` | Số khung hình ổn định liên tiếp trước khi nhận diện (1 = nhận diện tức thì). |
+| `FRAME_INTERVAL_SECONDS` | `0.3` | Khoảng cách lấy mẫu giữa hai khung hình gửi vào mô hình AI. |
 
 Firmware `firmware/esp32_cam_softap/` phục vụ ảnh chụp và trạng thái ở cổng 80 (`/capture`, `/status`), luồng MJPEG ở cổng 81 (`/stream`).
 
