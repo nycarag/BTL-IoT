@@ -532,6 +532,7 @@ async def import_schedules(
     mode: str = Form("preview"),
     on_conflict: str = Form("skip"),
     class_id: int | None = Form(None),
+    keyword: str | None = Form(None),
     username: str = Depends(verify_token),
     db: Session = Depends(get_db),
 ):
@@ -539,6 +540,13 @@ async def import_schedules(
         raise HTTPException(422, "Chế độ (mode) không hợp lệ, chỉ chấp nhận preview hoặc commit")
     if on_conflict not in {"skip", "update"}:
         raise HTTPException(422, "on_conflict không hợp lệ, chỉ chấp nhận skip hoặc update")
+
+    if keyword is not None:
+        keyword = keyword.strip()
+        if not keyword:
+            keyword = None
+        elif len(keyword) > 100:
+            raise HTTPException(422, "Từ khóa lọc không được vượt quá 100 ký tự")
 
     filename = file.filename or ""
     ext = Path(filename).suffix.lower()
@@ -649,6 +657,21 @@ async def import_schedules(
             if not row_dict.get("class_code") and form_class_obj:
                 row_dict["class_code"] = form_class_obj.code
             raw_items.append(row_dict)
+
+    # Đếm tổng dòng gốc và lọc theo từ khóa nếu có
+    total_rows = len(raw_items)
+    filtered_out = 0
+    if keyword:
+        kw_fold = keyword.casefold()
+        retained_items: list[dict[str, Any]] = []
+        for item in raw_items:
+            t = str(item.get("title") or "").casefold()
+            n = str(item.get("note") or "").casefold()
+            if kw_fold in t or kw_fold in n:
+                retained_items.append(item)
+            else:
+                filtered_out += 1
+        raw_items = retained_items
 
     # Validate each row and collect ALL errors
     errors: list[ScheduleImportError] = []
@@ -874,7 +897,6 @@ async def import_schedules(
             }
         )
 
-    total_rows = len(raw_items)
     valid_rows = created + updated + skipped
     preview_rows = [
         {
@@ -897,6 +919,7 @@ async def import_schedules(
         created=created,
         updated=updated,
         skipped=skipped,
+        filtered_out=filtered_out,
         errors=errors,
         rows=preview_rows,
     )
@@ -931,6 +954,8 @@ async def import_schedules(
                 "schedules.import",
                 detail={
                     "filename": filename,
+                    "keyword": keyword,
+                    "filtered_out": filtered_out,
                     "created": created,
                     "updated": updated,
                     "skipped": skipped,

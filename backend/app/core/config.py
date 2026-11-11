@@ -77,6 +77,8 @@ class Settings:
         ).split(",") if origin.strip()
     )
     cors_origin_regex: str = os.getenv("CORS_ORIGIN_REGEX", DEFAULT_CORS_ORIGIN_REGEX).strip()
+    auto_session_enabled: bool = os.getenv("AUTO_SESSION_ENABLED", "true").lower().strip() not in ("0", "false", "no")
+    auto_session_interval_seconds: int = max(5, min(300, int(os.getenv("AUTO_SESSION_INTERVAL_SECONDS", "30"))))
 
 
 settings = Settings()

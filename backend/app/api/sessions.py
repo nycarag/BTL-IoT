@@ -2,14 +2,14 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, text
-
-from app.services.websocket import manager
 from sqlalchemy.orm import Session
 
 from app.core.security import verify_token
 from app.database import get_db
 from app.models import AttendanceSession, ClassRoom
 from app.schemas import SessionCreate, SessionResponse
+from app.services import session_lifecycle
+from app.services.websocket import manager
 
 router = APIRouter()
 
@@ -38,26 +38,13 @@ def _set_status(session_id: int, target: str, db: Session) -> AttendanceSession:
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     now = datetime.now(timezone.utc)
-    if target == "open":
-        if session.status == "closed":
-            raise HTTPException(status_code=409, detail="Closed session cannot be reopened")
-        open_sessions = db.scalars(
-            select(AttendanceSession).where(
-                AttendanceSession.class_id == session.class_id,
-                AttendanceSession.status == "open",
-                AttendanceSession.id != session_id
-            )
-        ).all()
-        for old in open_sessions:
-            old.status = "closed"
-            old.ends_at = now
-        session.status = "open"
-        session.starts_at = session.starts_at or now
-    else:
-        if session.status != "open":
-            raise HTTPException(status_code=409, detail="Only an open session can be closed")
-        session.status = "closed"
-        session.ends_at = now
+    try:
+        if target == "open":
+            session_lifecycle.open_session(db, session, now)
+        else:
+            session_lifecycle.close_session(db, session, now)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     db.commit()
     db.refresh(session)
     return session

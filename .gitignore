@@ -21,4 +21,5 @@ venv/
 ENV/
 node_modules/
 *.db
+firmware/**/config.h
 

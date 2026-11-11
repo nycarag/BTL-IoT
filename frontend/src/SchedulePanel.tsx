@@ -26,6 +26,10 @@ type PreviewRow = {
   action?: string;
 };
 
+type ScheduleImportResult = ImportResult & {
+  filtered_out?: number;
+};
+
 interface SchedulePanelProps {
   api: ApiFn;
   apiUrl: string;
@@ -112,7 +116,8 @@ export default function SchedulePanel(props: SchedulePanelProps) {
   // Import state
   const [importFile, setImportFile] = useState<File | null>(null);
   const [onConflict, setOnConflict] = useState<"skip" | "update">("skip");
-  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [keywordFilter, setKeywordFilter] = useState<string>("");
+  const [importResult, setImportResult] = useState<ScheduleImportResult | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
 
   const rawApi = useMemo(() => makeRawApi(props.apiUrl, props.token), [props.apiUrl, props.token]);
@@ -384,13 +389,17 @@ export default function SchedulePanel(props: SchedulePanelProps) {
       if (classFilter) {
         fields.class_id = classFilter;
       }
-      const res = await uploadImport(rawApi, "/schedules/import", importFile, fields);
+      if (keywordFilter.trim()) {
+        fields.keyword = keywordFilter.trim();
+      }
+      const res = (await uploadImport(rawApi, "/schedules/import", importFile, fields)) as ScheduleImportResult;
       setImportResult(res);
       if (res.errors && res.errors.length > 0) {
         setError(`Tệp có ${res.errors.length} lỗi kiểm tra. Vui lòng xem bảng lỗi bên dưới.`);
       } else {
+        const filteredPart = (res.filtered_out ?? 0) > 0 ? ` · ${res.filtered_out} không khớp môn` : "";
         setNotice(
-          `Xem trước thành công: ${res.valid_rows}/${res.total_rows} dòng hợp lệ (${res.created} tạo mới, ${res.updated} cập nhật, ${res.skipped} bỏ qua).`
+          `Xem trước thành công: ${res.valid_rows}/${res.total_rows} dòng hợp lệ (${res.created} tạo mới, ${res.updated} cập nhật, ${res.skipped} bỏ qua${filteredPart}).`
         );
       }
     } catch (err: unknown) {
@@ -420,12 +429,16 @@ export default function SchedulePanel(props: SchedulePanelProps) {
       if (classFilter) {
         fields.class_id = classFilter;
       }
-      const res = await uploadImport(rawApi, "/schedules/import", importFile, fields);
+      if (keywordFilter.trim()) {
+        fields.keyword = keywordFilter.trim();
+      }
+      const res = (await uploadImport(rawApi, "/schedules/import", importFile, fields)) as ScheduleImportResult;
       setImportResult(res);
       if (res.errors && res.errors.length > 0) {
         setError(`Nhập thất bại: tệp còn ${res.errors.length} lỗi.`);
       } else {
-        setNotice(`Đã nhập thành công: ${res.created} tạo mới, ${res.updated} cập nhật, ${res.skipped} bỏ qua.`);
+        const filteredPart = (res.filtered_out ?? 0) > 0 ? ` · ${res.filtered_out} không khớp môn` : "";
+        setNotice(`Đã nhập thành công: ${res.created} tạo mới, ${res.updated} cập nhật, ${res.skipped} bỏ qua${filteredPart}.`);
         setImportFile(null);
         setImportResult(null);
         if (importInputRef.current) importInputRef.current.value = "";
@@ -450,6 +463,10 @@ export default function SchedulePanel(props: SchedulePanelProps) {
 
   return (
     <div>
+      <p className="muted" style={{ margin: "0 0 16px 0", fontSize: "0.85rem" }}>
+        Ca điểm danh tự mở lúc bắt đầu và tự đóng lúc kết thúc buổi học. Đóng ca thì sinh viên chưa điểm danh bị ghi vắng.
+      </p>
+
       {/* Thông báo trạng thái */}
       {error && (
         <div className="error" style={{ marginBottom: "20px" }}>
@@ -703,6 +720,21 @@ export default function SchedulePanel(props: SchedulePanelProps) {
             </label>
 
             <label style={{ margin: "10px 0" }}>
+              Lọc theo môn
+              <input
+                type="text"
+                placeholder="VD: INT14149 hoặc IoT"
+                maxLength={100}
+                value={keywordFilter}
+                onChange={(e) => setKeywordFilter(e.target.value)}
+                disabled={busy}
+              />
+              <small className="muted" style={{ display: "block", marginTop: "4px" }}>
+                File QLDT có lịch mọi môn. Nhập mã môn để chỉ lấy môn cần điểm danh.
+              </small>
+            </label>
+
+            <label style={{ margin: "10px 0" }}>
               Xử lý khi trùng lịch học
               <select
                 value={onConflict}
@@ -752,6 +784,7 @@ export default function SchedulePanel(props: SchedulePanelProps) {
                   <span>
                     Tổng {importResult.total_rows} dòng · Hợp lệ {importResult.valid_rows} ·{" "}
                     Tạo mới {importResult.created} · Cập nhật {importResult.updated} · Bỏ qua {importResult.skipped}
+                    {(importResult.filtered_out ?? 0) > 0 && ` · ${importResult.filtered_out} không khớp môn`}
                   </span>
                 </div>
 

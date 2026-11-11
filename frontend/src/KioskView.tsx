@@ -70,11 +70,20 @@ export default function KioskView({ api, devices, selectedSession, onSelectSessi
     };
   }, []);
 
-  // Xác định phiên đang điểm danh: phiên chọn -> phiên đang mở -> phiên đầu tiên
-  const currentSession = sessions.find(s => String(s.id) === selectedSession)
-    || sessions.find(s => s.status === "open")
-    || sessions[0];
+  // Xác định phiên đang điểm danh: nếu phiên chọn đang mở thì giữ; nếu đã đóng thì ưu tiên phiên đang mở
+  const selectedObj = sessions.find(s => String(s.id) === selectedSession);
+  const openSession = sessions.find(s => s.status === "open");
+  const currentSession = (selectedObj && selectedObj.status === "open")
+    ? selectedObj
+    : (openSession || selectedObj || sessions[0]);
   const currentSessionId = currentSession?.id;
+
+  // Đồng bộ lại selectedSession khi Kiosk tự động chọn phiên đang mở
+  useEffect(() => {
+    if (currentSessionId && String(currentSessionId) !== selectedSession && onSelectSession) {
+      onSelectSession(String(currentSessionId));
+    }
+  }, [currentSessionId, selectedSession, onSelectSession]);
 
   // Tự động gán phiên đang chọn cho camera khi mở chế độ Kiosk
   useEffect(() => {

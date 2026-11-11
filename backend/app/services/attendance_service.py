@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.config import settings
 from app.models import Attendance, AttendanceSession, ClassSchedule, Student
 from app.models.school import DeviceConfig, FaceReference
+from app.services import session_lifecycle
 
 
 def record_attendance(db, session, student, *, device_id, verification):
@@ -33,14 +34,18 @@ def record_attendance(db, session, student, *, device_id, verification):
         db.commit()
         return existing, False
     now = datetime.now(timezone.utc)
-    schedule = db.scalar(select(ClassSchedule).where(ClassSchedule.session_id == session_id))
-    if schedule is not None and schedule.start_at is not None:
-        start = schedule.start_at.replace(tzinfo=timezone.utc) if schedule.start_at.tzinfo is None else schedule.start_at
-    else:
-        start = session.starts_at.replace(tzinfo=timezone.utc) if session.starts_at else now
-    row = Attendance(session_id=session_id, student_id=student_id, checked_at=now,
-                     status="late" if now > start + timedelta(minutes=settings.late_after_minutes) else "present",
-                     device_id=device_id, verification=verification)
+    ref_start = session_lifecycle.late_reference_start(db, session)
+    start = ref_start if ref_start is not None else now
+    late_minutes = session_lifecycle.get_late_minutes(db)
+    att_status = session_lifecycle.status_for(now, start, late_minutes)
+    row = Attendance(
+        session_id=session_id,
+        student_id=student_id,
+        checked_at=now,
+        status=att_status,
+        device_id=device_id,
+        verification=verification,
+    )
     db.add(row)
     try:
         db.commit()

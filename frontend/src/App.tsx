@@ -18,7 +18,7 @@ type ModelStatus = { pad: { ready: boolean; loaded: boolean; reason: string; mod
 type BridgeStatus = { running: boolean; pid: number | null; source: string | null; device_id: string; camera_url: string | null; connected: boolean; recent_errors: string[] };
 const API = (import.meta.env.VITE_API_URL || (typeof window !== "undefined" && window.location.origin ? window.location.origin : "http://127.0.0.1:8000")).replace(/\/$/, "");
 const initialStudent = { student_code: "", name: "", class_id: "", date_of_birth: "" };
-const labels: Record<string, string> = { present: "Đúng giờ", late: "Đi muộn", open: "Đang mở", closed: "Đã đóng", draft: "Chưa mở", online: "Trực tuyến", offline: "Ngoại tuyến", accepted: "Chấp nhận", rejected: "Từ chối", manual: "Thủ công", error: "Lỗi" };
+const labels: Record<string, string> = { present: "Có mặt", late: "Đi muộn", absent: "Vắng mặt", open: "Đang mở", closed: "Đã đóng", draft: "Chưa mở", online: "Trực tuyến", offline: "Ngoại tuyến", accepted: "Chấp nhận", rejected: "Từ chối", manual: "Thủ công", error: "Lỗi" };
 const time = (value: string) => new Date(/Z$|[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`).toLocaleString("vi-VN");
 
 export default function App() {
@@ -34,6 +34,7 @@ export default function App() {
   const [rows, setRows] = useState<Attendance[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
   const [models, setModels] = useState<ModelStatus | null>(null);
+  const [lateMinutesInput, setLateMinutesInput] = useState<number>(15);
   const [selected, setSelected] = useState("");
   const [socketState, setSocketState] = useState("Chưa kết nối");
   const [studentForm, setStudentForm] = useState(initialStudent);
@@ -100,9 +101,14 @@ export default function App() {
   // Tự động chọn buổi học đang mở ("open") hoặc buổi gần nhất khi tải xong sessions
   useEffect(() => {
     if (sessions.length > 0) {
-      if (!selected || !sessions.some(s => String(s.id) === selected)) {
-        const active = sessions.find(s => s.status === "open") || sessions[0];
+      const currentSelected = sessions.find(s => String(s.id) === selected);
+      const openSession = sessions.find(s => s.status === "open");
+      if (!currentSelected) {
+        const active = openSession || sessions[0];
         if (active) setSelected(String(active.id));
+      } else if (currentSelected.status === "closed" && openSession && String(openSession.id) !== selected) {
+        // Tự động chuyển sang phiên đang mở khi phiên trước đó đã đóng
+        setSelected(String(openSession.id));
       }
     }
   }, [sessions, selected]);
@@ -132,9 +138,23 @@ export default function App() {
     return () => { active = false; };
   }, [deviceId, token, api]);
 
+  useEffect(() => {
+    if (!token) return;
+    let active = true;
+    api("/settings/attendance")
+      .then(r => r.json())
+      .then(data => {
+        if (active && typeof data.late_after_minutes === "number") {
+          setLateMinutesInput(data.late_after_minutes);
+        }
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [token, api]);
+
   const current = sessions.find(s => s.id === Number(selected));
   const roster = current ? students.filter(s => s.class_id === current.class_id) : [];
-  const absent = roster.filter(s => !rows.some(r => r.student_id === s.id));
+  const absent = roster.filter(s => !rows.some(r => r.student_id === s.id && (r.status === "present" || r.status === "late")));
   const className = (id: number | null) => classes.find(c => c.id === id)?.code ?? "Chưa xếp lớp";
   const badge = (value: string) => <span className={`badge ${value}`}>{labels[value] ?? value}</span>;
   const onSubmit = (event: FormEvent<HTMLFormElement>, work: (data: FormData) => Promise<void>) => { event.preventDefault(); const data = new FormData(event.currentTarget); void action(() => work(data)); };
@@ -144,9 +164,178 @@ export default function App() {
   return <div className="shell"><aside><a className="brand" href="#" onClick={e => e.preventDefault()}><span className="brand-mark">A</span><span>Attendance<small>AIoT WORKSPACE</small></span></a><nav>{[["kiosk", "00", "🖥️ Kiosk Điểm Danh"], ["attendance", "01", "Bảng Quản Trị"], ["students", "02", "Sinh viên"], ["classes", "03", "Lớp & buổi học"], ["devices", "04", "Thiết bị & ROI"], ["events", "05", "Nhật ký xác thực"], ["schedule", "06", "Lịch học"], ["audit", "07", "Nhật ký quản trị"]].map(([key, number, title]) => <button key={key} className={tab === key ? "nav active" : "nav"} onClick={() => setTab(key)}><small>{number}</small>{title}</button>)}</nav><div className="aside-bottom"><button className="secondary" onClick={async () => { try { await api("/auth/logout", { method: "POST" }); } catch { /* bỏ qua lỗi */ } setToken(""); setRows([]); setEvents([]); }}>Đăng xuất</button></div></aside><main className="workspace"><header><div><h1>{({ kiosk: "Kiosk Điểm Danh Thời Gian Thực", attendance: "Theo dõi điểm danh", students: "Hồ sơ sinh viên", classes: "Lớp & buổi học", devices: "Thiết bị & vùng điểm danh", events: "Nhật ký xác thực", schedule: "Lịch học", audit: "Nhật ký quản trị" })[tab]}</h1></div><button className="secondary" disabled={busy} onClick={() => void action(async () => {})}>↻ Làm mới</button></header>{error && <div className="message error" role="alert">{error}<button className="link" onClick={() => setError("")}>Đóng</button></div>}{notice && <div className="message" role="status">{notice}</div>}
     {models && (!models.pad.ready || !models.recognition.ready) && <div className="warning"><strong>⚠ Dịch vụ AI chưa sẵn sàng</strong><span>PAD: {models.pad.reason}. Nhận diện: {models.recognition.reason}.</span></div>}
     {tab === "kiosk" && <KioskView api={api} devices={devices} selectedSession={selected} onSelectSession={setSelected} token={token} apiUrl={API} students={students} classes={classes} rows={rows} sessions={sessions} />}
-    {tab === "attendance" && <><CameraPanel api={api} devices={devices} selectedSession={selected} token={token} apiUrl={API} /><div className="toolbar"><label>Buổi học<select value={selected} onChange={e => setSelected(e.target.value)}><option value="">Tất cả bản ghi</option>{sessions.map(s => <option key={s.id} value={s.id}>{s.title} · {className(s.class_id)} · {labels[s.status]}</option>)}</select></label><span className="muted">{socketState}</span><button disabled={busy || !rows.length} onClick={() => void action(async () => { const response = await api(`/attendance/export${selected ? `?session_id=${selected}` : ""}`); const url = URL.createObjectURL(await response.blob()); const a = document.createElement("a"); a.href = url; a.download = `attendance-${selected || "all"}.csv`; a.click(); URL.revokeObjectURL(url); })}>↓ Xuất CSV</button></div><div className="stats"><section className="panel"><small>ĐÃ GHI NHẬN</small><strong>{new Set(rows.map(r => r.student_id)).size}</strong><span>{selected ? "trong buổi học đã chọn" : "trong toàn hệ thống"}</span></section><section className="panel"><small>ĐI MUỘN</small><strong>{new Set(rows.filter(r => r.status === "late").map(r => r.student_id)).size}</strong><span>Sau {models?.late_after_minutes ?? "—"} phút từ lúc mở</span></section><section className="panel"><small>CHƯA GHI NHẬN</small><strong>{current ? absent.length : "—"}</strong><span>{current ? `${roster.length} sinh viên hiện thuộc lớp` : "Chọn một buổi học để xem"}</span></section></div><section className="panel"><div className="panel-head"><h2>Danh sách điểm danh</h2>{current && badge(current.status)}</div><div className="table-wrap"><table><thead><tr><th>Sinh viên</th><th>Thời gian</th><th>Trạng thái</th><th>Xác thực</th></tr></thead><tbody>{rows.map(r => <tr key={r.id}><td><strong>{r.student_name}</strong><small>{r.student_code}</small></td><td>{time(r.checked_at)}</td><td>{badge(r.status)}</td><td><code>{r.verification}</code></td></tr>)}{!rows.length && <tr><td colSpan={4} className="empty">Chưa có bản ghi điểm danh.</td></tr>}</tbody></table></div></section>{current && <section className="panel spaced"><h2>Xác minh thay thế</h2><p className="muted">Chỉ dùng khi giảng viên đã kiểm tra trực tiếp danh tính. Bản ghi được gắn nhãn thủ công và lưu lý do.</p><form className="inline-form" onSubmit={e => onSubmit(e, async data => { await api(`/sessions/${selected}/manual-attendance`, { method: "POST", body: JSON.stringify({ student_id: Number(data.get("student_id")), reason: data.get("reason") }) }); })}><label>Sinh viên<select name="student_id" required><option value="">Chọn sinh viên chưa ghi nhận</option>{absent.map(s => <option key={s.id} value={s.id}>{s.student_code} · {s.name}</option>)}</select></label><label>Lý do<input name="reason" required minLength={5} maxLength={500} placeholder="Đã kiểm tra thẻ sinh viên…" /></label><button disabled={busy || current.status !== "open" || !absent.length}>Xác nhận thủ công</button></form></section>}</>}
+    {tab === "attendance" && (
+      <>
+        <CameraPanel api={api} devices={devices} selectedSession={selected} token={token} apiUrl={API} />
+
+        {/* Khung cấu hình ngưỡng đi muộn K04 / K06b */}
+        <section className="panel" style={{ marginBottom: "20px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
+            <label style={{ margin: 0, minWidth: "180px", flex: "1 1 180px" }}>
+              Ngưỡng đi muộn (phút)
+              <input
+                type="number"
+                min={1}
+                max={120}
+                value={lateMinutesInput}
+                onChange={e => setLateMinutesInput(Number(e.target.value))}
+                disabled={busy}
+              />
+            </label>
+            <button
+              style={{ marginTop: "18px" }}
+              disabled={busy}
+              onClick={() => {
+                if (!confirm(`Đổi ngưỡng đi muộn thành ${lateMinutesInput} phút? Trạng thái đúng giờ/đi muộn của các bản ghi cũ sẽ được tính lại.`)) return;
+                void action(async () => {
+                  const res = await api("/settings/attendance", {
+                    method: "PUT",
+                    body: JSON.stringify({ late_after_minutes: lateMinutesInput }),
+                  });
+                  const data = await res.json();
+                  setNotice(`Đã lưu. ${data.recomputed} bản ghi được cập nhật.`);
+                  const statusRes = await api("/system/status");
+                  setModels(await statusRes.json());
+                  const rowsRes = await api(`/attendance${selected ? `?session_id=${selected}` : ""}`);
+                  setRows(await rowsRes.json());
+                });
+              }}
+            >
+              Lưu
+            </button>
+            <small className="muted" style={{ flex: "1 1 280px", marginTop: "18px" }}>
+              Mặc định 15 phút tính từ giờ bắt đầu buổi học. Bấm lưu để tính lại trạng thái có mặt / đi muộn của bản ghi cũ.
+            </small>
+          </div>
+        </section>
+
+        <div className="toolbar">
+          <label>
+            Buổi học
+            <select value={selected} onChange={e => setSelected(e.target.value)}>
+              <option value="">Tất cả bản ghi</option>
+              {sessions.map(s => (
+                <option key={s.id} value={s.id}>
+                  {s.title} · {className(s.class_id)} · {labels[s.status]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <span className="muted">{socketState}</span>
+          <button
+            disabled={busy || !rows.length}
+            onClick={() => void action(async () => {
+              const response = await api(`/attendance/export${selected ? `?session_id=${selected}` : ""}`);
+              const url = URL.createObjectURL(await response.blob());
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `attendance-${selected || "all"}.csv`;
+              a.click();
+              URL.revokeObjectURL(url);
+            })}
+          >
+            ↓ Xuất CSV
+          </button>
+        </div>
+
+        <div className="stats">
+          <section className="panel">
+            <small>ĐÃ GHI NHẬN</small>
+            <strong>{new Set(rows.filter(r => r.status === "present" || r.status === "late").map(r => r.student_id)).size}</strong>
+            <span>{selected ? "trong buổi học đã chọn" : "trong toàn hệ thống"}</span>
+          </section>
+          <section className="panel">
+            <small>ĐI MUỘN</small>
+            <strong>{new Set(rows.filter(r => r.status === "late").map(r => r.student_id)).size}</strong>
+            <span>Sau {models?.late_after_minutes ?? lateMinutesInput} phút từ giờ bắt đầu buổi học</span>
+          </section>
+          <section className="panel">
+            <small>{current?.status === "closed" ? "VẮNG MẶT" : "CHƯA GHI NHẬN"}</small>
+            <strong>{current?.status === "closed" ? rows.filter(r => r.status === "absent").length : (current ? absent.length : "—")}</strong>
+            <span>{current ? (current.status === "closed" ? `${roster.length} sinh viên thuộc lớp` : `${roster.length} sinh viên hiện thuộc lớp`) : "Chọn một buổi học để xem"}</span>
+          </section>
+        </div>
+
+        <section className="panel">
+          <div className="panel-head">
+            <h2>Danh sách điểm danh</h2>
+            {current && badge(current.status)}
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Sinh viên</th>
+                  <th>Thời gian</th>
+                  <th>Trạng thái</th>
+                  <th>Xác thực</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(r => (
+                  <tr key={r.id}>
+                    <td>
+                      <strong>{r.student_name}</strong>
+                      <small>{r.student_code}</small>
+                    </td>
+                    <td>{time(r.checked_at)}</td>
+                    <td>{badge(r.status)}</td>
+                    <td>
+                      <code>{r.verification}</code>
+                    </td>
+                  </tr>
+                ))}
+                {!rows.length && (
+                  <tr>
+                    <td colSpan={4} className="empty">
+                      Chưa có bản ghi điểm danh.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {current && (
+          <section className="panel spaced">
+            <h2>Xác minh thay thế</h2>
+            <p className="muted">Chỉ dùng khi giảng viên đã kiểm tra trực tiếp danh tính. Bản ghi được gắn nhãn thủ công và lưu lý do.</p>
+            <form
+              className="inline-form"
+              onSubmit={e => onSubmit(e, async data => {
+                await api(`/sessions/${selected}/manual-attendance`, {
+                  method: "POST",
+                  body: JSON.stringify({
+                    student_id: Number(data.get("student_id")),
+                    reason: data.get("reason"),
+                  }),
+                });
+              })}
+            >
+              <label>
+                Sinh viên
+                <select name="student_id" required>
+                  <option value="">Chọn sinh viên chưa ghi nhận</option>
+                  {absent.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.student_code} · {s.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Lý do
+                <input name="reason" required minLength={5} maxLength={500} placeholder="Đã kiểm tra thẻ sinh viên…" />
+              </label>
+              <button disabled={busy || current.status !== "open" || !absent.length}>Xác nhận thủ công</button>
+            </form>
+          </section>
+        )}
+      </>
+    )}
     {tab === "students" && <><section className="panel"><h2>{editing ? "Cập nhật sinh viên" : "Thêm sinh viên"}</h2><form className="inline-form" onSubmit={e => onSubmit(e, async () => { await api(`/students${editing ? `/${editing}` : ""}`, { method: editing ? "PUT" : "POST", body: JSON.stringify({ ...studentForm, class_id: studentForm.class_id ? Number(studentForm.class_id) : null, date_of_birth: studentForm.date_of_birth || null }) }); setEditing(null); setStudentForm(initialStudent); })}><label>Mã sinh viên<input required pattern="[A-Za-z0-9_-]+" maxLength={32} value={studentForm.student_code} onChange={e => setStudentForm({ ...studentForm, student_code: e.target.value })} /></label><label>Họ và tên<input required maxLength={255} value={studentForm.name} onChange={e => setStudentForm({ ...studentForm, name: e.target.value })} /></label><label>Ngày sinh<input placeholder="dd/mm/yyyy" value={studentForm.date_of_birth} onChange={e => setStudentForm({ ...studentForm, date_of_birth: e.target.value })} /></label><label>Lớp<select value={studentForm.class_id} onChange={e => setStudentForm({ ...studentForm, class_id: e.target.value })}><option value="">Chưa xếp lớp</option>{classes.map(c => <option key={c.id} value={c.id}>{c.code}</option>)}</select></label><button disabled={busy}>{editing ? "Lưu" : "Thêm sinh viên"}</button>{editing && <button type="button" className="secondary" onClick={() => { setEditing(null); setStudentForm(initialStudent); }}>Hủy</button>}</form></section><RosterImportExport api={api} apiUrl={API} token={token} classes={classes} onImported={() => void refresh()} /><section className="panel spaced"><div className="panel-head"><h2>Danh sách · {students.filter(s => (!classFilter || s.class_id === Number(classFilter)) && `${s.name} ${s.student_code}`.toLowerCase().includes(search.toLowerCase())).length} / {students.length} sinh viên</h2><div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}><select aria-label="Lọc theo lớp" value={classFilter} onChange={e => setClassFilter(e.target.value)} style={{ maxWidth: "200px" }}><option value="">Tất cả các lớp</option>{classes.map(c => <option key={c.id} value={c.id}>{c.code} · {c.name}</option>)}</select><input aria-label="Tìm sinh viên" placeholder="Tìm tên hoặc mã sinh viên" value={search} onChange={e => setSearch(e.target.value)} /></div></div><div className="table-wrap"><table><thead><tr><th>Sinh viên</th><th>Lớp</th><th>Khuôn mặt</th><th>Thao tác</th></tr></thead><tbody>{students.filter(s => (!classFilter || s.class_id === Number(classFilter)) && `${s.name} ${s.student_code}`.toLowerCase().includes(search.toLowerCase())).map(s => <tr key={s.id}><td><strong>{s.name}</strong><small>{s.student_code}</small></td><td>{className(s.class_id)}</td><td><div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>{s.enrolled ? <span className="badge open">✓ Đã đăng ký</span> : <span className="badge offline">Chưa có ảnh</span>}<button type="button" className={s.enrolled ? "secondary" : ""} style={{ padding: "5px 10px", fontSize: "0.72rem" }} onClick={() => setEnrollingStudent(s)}>{s.enrolled ? "Cập nhật mặt" : "📸 Đăng ký mặt"}</button></div></td><td><div className="actions"><button className="secondary" onClick={() => { setEditing(s.id); setStudentForm({ student_code: s.student_code, name: s.name, class_id: s.class_id?.toString() ?? "", date_of_birth: s.date_of_birth ?? "" }); window.scrollTo({ top: 0, behavior: "smooth" }); }}>Sửa</button><button className="danger" disabled={busy} onClick={() => { if (confirm(`Xóa hồ sơ ${s.student_code}? Hồ sơ có lịch sử điểm danh sẽ không bị xóa.`)) void action(async () => { await api(`/students/${s.id}`, { method: "DELETE" }); }); }}>Xóa</button></div></td></tr>)}{!students.length && <tr><td colSpan={4} className="empty">Thêm sinh viên hoặc chạy seed để nạp danh sách lớp.</td></tr>}</tbody></table></div></section></>}
-    {tab === "classes" && <><div className="two-col"><section className="panel"><h2>{editingClass ? "Sửa lớp" : "Tạo lớp học"}</h2><form onSubmit={e => onSubmit(e, async () => { await api(`/classes${editingClass ? `/${editingClass}` : ""}`, { method: editingClass ? "PUT" : "POST", body: JSON.stringify(classForm) }); setClassForm({ code: "", name: "" }); setEditingClass(null); })}><label>Mã lớp<input required value={classForm.code} onChange={e => setClassForm({ ...classForm, code: e.target.value })} /></label><label>Tên lớp<input required value={classForm.name} onChange={e => setClassForm({ ...classForm, name: e.target.value })} /></label><button disabled={busy}>Lưu lớp</button>{editingClass && <button type="button" className="secondary" onClick={() => { setEditingClass(null); setClassForm({ code: "", name: "" }); }}>Hủy</button>}</form></section><section className="panel"><h2>Tạo buổi điểm danh</h2><form onSubmit={e => onSubmit(e, async data => { await api("/sessions", { method: "POST", body: JSON.stringify({ class_id: Number(data.get("class_id")), title: data.get("title") }) }); })}><label>Lớp<select name="class_id" required><option value="">Chọn lớp</option>{classes.map(c => <option key={c.id} value={c.id}>{c.code}</option>)}</select></label><label>Tên buổi học<input name="title" required maxLength={255} placeholder="IoT · Buổi 01" /></label><button disabled={busy || !classes.length}>Tạo buổi học</button></form></section></div><section className="panel spaced"><h2>Lớp học</h2><div className="list">{classes.map(c => <div className="list-row" key={c.id}><div><strong>{c.code}</strong><small>{c.name} · {students.filter(s => s.class_id === c.id).length} sinh viên</small></div><div className="actions"><button className="secondary" onClick={() => { setEditingClass(c.id); setClassForm({ code: c.code, name: c.name }); }}>Sửa</button><button className="danger" disabled={busy} onClick={() => { if (confirm(`Xóa lớp ${c.code}?`)) void action(async () => { await api(`/classes/${c.id}`, { method: "DELETE" }); }); }}>Xóa</button></div></div>)}{!classes.length && <p className="empty">Chưa có lớp học.</p>}</div></section><section className="panel spaced"><h2>Các buổi học</h2><div className="list">{sessions.map(s => <div className="list-row" key={s.id}><div><strong>{s.title}</strong><small>{className(s.class_id)} · #{s.id}</small></div><div className="actions">{badge(s.status)}<button className="secondary" onClick={() => { setSelected(String(s.id)); setTab("attendance"); }}>Xem</button>{s.status !== "closed" && <button disabled={busy} className={s.status === "open" ? "danger" : ""} onClick={() => { if (s.status === "open" && !confirm("Đóng buổi học? Không thể mở lại buổi đã đóng.")) return; void action(async () => { await api(`/sessions/${s.id}/${s.status === "open" ? "close" : "start"}`, { method: "POST" }); }); }}>{s.status === "open" ? "Đóng phiên" : "Mở điểm danh"}</button>}</div></div>)}{!sessions.length && <p className="empty">Chưa có buổi học.</p>}</div></section></>}
+    {tab === "classes" && <><div className="two-col"><section className="panel"><h2>{editingClass ? "Sửa lớp" : "Tạo lớp học"}</h2><form onSubmit={e => onSubmit(e, async () => { await api(`/classes${editingClass ? `/${editingClass}` : ""}`, { method: editingClass ? "PUT" : "POST", body: JSON.stringify(classForm) }); setClassForm({ code: "", name: "" }); setEditingClass(null); })}><label>Mã lớp<input required value={classForm.code} onChange={e => setClassForm({ ...classForm, code: e.target.value })} /></label><label>Tên lớp<input required value={classForm.name} onChange={e => setClassForm({ ...classForm, name: e.target.value })} /></label><button disabled={busy}>Lưu lớp</button>{editingClass && <button type="button" className="secondary" onClick={() => { setEditingClass(null); setClassForm({ code: "", name: "" }); }}>Hủy</button>}</form></section><section className="panel"><h2>Tạo buổi điểm danh</h2><form onSubmit={e => onSubmit(e, async data => { const classId = Number(data.get("class_id")); const title = String(data.get("title") || ""); const autoOpen = data.get("auto_open") === "on"; const res = await api("/sessions", { method: "POST", body: JSON.stringify({ class_id: classId, title }) }); const created = await res.json(); if (autoOpen && created?.id) { await api(`/sessions/${created.id}/start`, { method: "POST" }); } if (created?.id) setSelected(String(created.id)); })}><label>Lớp<select name="class_id" required><option value="">Chọn lớp</option>{classes.map(c => <option key={c.id} value={c.id}>{c.code}</option>)}</select></label><label>Tên buổi học<input name="title" required maxLength={255} placeholder="IoT · Buổi 01" /></label><label style={{ display: "flex", alignItems: "center", gap: "8px", margin: "8px 0", cursor: "pointer", fontSize: "0.88rem" }}><input type="checkbox" name="auto_open" defaultChecked style={{ width: "auto", margin: 0 }} /><span>Mở điểm danh ngay sau khi tạo</span></label><button disabled={busy || !classes.length}>Tạo buổi học</button></form></section></div><section className="panel spaced"><h2>Lớp học</h2><div className="list">{classes.map(c => <div className="list-row" key={c.id}><div><strong>{c.code}</strong><small>{c.name} · {students.filter(s => s.class_id === c.id).length} sinh viên</small></div><div className="actions"><button className="secondary" onClick={() => { setEditingClass(c.id); setClassForm({ code: c.code, name: c.name }); }}>Sửa</button><button className="danger" disabled={busy} onClick={() => { if (confirm(`Xóa lớp ${c.code}?`)) void action(async () => { await api(`/classes/${c.id}`, { method: "DELETE" }); }); }}>Xóa</button></div></div>)}{!classes.length && <p className="empty">Chưa có lớp học.</p>}</div></section><section className="panel spaced"><h2>Các buổi học</h2><div className="list">{sessions.map(s => <div className="list-row" key={s.id}><div><strong>{s.title}</strong><small>{className(s.class_id)} · #{s.id}</small></div><div className="actions">{badge(s.status)}<button className="secondary" onClick={() => { setSelected(String(s.id)); setTab("attendance"); }}>Xem</button>{s.status !== "closed" && <button disabled={busy} className={s.status === "open" ? "danger" : ""} onClick={() => { if (s.status === "open" && !confirm("Đóng buổi học? Không thể mở lại buổi đã đóng.")) return; void action(async () => { await api(`/sessions/${s.id}/${s.status === "open" ? "close" : "start"}`, { method: "POST" }); }); }}>{s.status === "open" ? "Đóng phiên" : "Mở điểm danh"}</button>}</div></div>)}{!sessions.length && <p className="empty">Chưa có buổi học.</p>}</div></section></>}
     {tab === "devices" && <>
       <section className="panel">
         <div className="panel-head">
@@ -191,6 +380,9 @@ export default function App() {
                 disabled={busy || bridgeBusy || !!bridgeStatus?.running}
               />
             </label>
+            <small style={{ display: "block", marginTop: "4px", color: "var(--muted)", fontSize: "0.75rem", fontWeight: "normal" }}>
+              Camera bắt hotspot: chạy tools/find_esp32.sh để lấy IP, hoặc xem IP trên Serial Monitor. Camera tự phát Wi-Fi: http://192.168.4.1/capture
+            </small>
           </div>
 
           <div className="bridge-buttons">

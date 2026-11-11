@@ -1,4 +1,5 @@
 from app.models.school import (
+    AppSetting,
     Attendance,
     AttendanceSession,
     AuditLog,
@@ -10,6 +11,7 @@ from app.models.school import (
 )
 
 __all__ = [
+    "AppSetting",
     "Attendance",
     "AttendanceSession",
     "AuditLog",

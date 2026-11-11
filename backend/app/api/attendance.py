@@ -21,6 +21,7 @@ from app.services.antispoof import AntiSpoofAdapter
 from app.services.face_detector import FaceDetector
 from app.services.face_recognition import FaceRecognitionAdapter, match
 from app.services.attendance_service import record_attendance
+from app.services import session_lifecycle
 from app.services.stability import gate
 from app.services.images import MAX_IMAGE_BYTES, decode_image, validate_image
 from app.services.websocket import manager
@@ -219,8 +220,12 @@ def list_events(session_id: int | None = None, _: str = Depends(verify_token), d
 
 
 @router.get("/system/status")
-def system_status(_: str = Depends(verify_token)):
+def system_status(_: str = Depends(verify_token), db: Session = Depends(get_db)):
     pad, recognizer = _pad(), _recognizer()
-    return {"pad": {"ready": pad.ready, "loaded": pad.session is not None, "reason": pad.reason, "model": pad.model},
-            "recognition": {"ready": recognizer.ready, "reason": recognizer.reason},
-            "stable_frames": settings.stable_frames, "late_after_minutes": settings.late_after_minutes}
+    late_minutes = session_lifecycle.get_late_minutes(db)
+    return {
+        "pad": {"ready": pad.ready, "loaded": pad.session is not None, "reason": pad.reason, "model": pad.model},
+        "recognition": {"ready": recognizer.ready, "reason": recognizer.reason},
+        "stable_frames": settings.stable_frames,
+        "late_after_minutes": late_minutes,
+    }

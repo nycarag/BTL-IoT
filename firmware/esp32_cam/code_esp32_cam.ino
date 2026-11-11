@@ -1,15 +1,43 @@
 #include "esp_camera.h"
 #include <WiFi.h>
+#include <ESPmDNS.h>
+#include <esp_wifi.h>
 #include "esp_http_server.h"
 #include "soc/soc.h"             // Thu vien quan ly nguon
 #include "soc/rtc_cntl_reg.h"    // Thu vien tat brownout (chong sap nguon)
+#include "config.h"
 
-// ========================================================
-// 1. CAU HINH WI-FI DO ESP32-CAM TU PHAT RA (ACCESS POINT)
-// IP CO DINH VINH VIEN: 192.168.4.1
-// ========================================================
-const char* ap_ssid = "ESP32_DIEM_DANH";
-const char* ap_password = "12345678"; // Mat khau it nhat 8 ky tu
+#ifndef WIFI_SSID
+#define WIFI_SSID "YOUR_PHONE_HOTSPOT"
+#endif
+
+#ifndef WIFI_PASSWORD
+#define WIFI_PASSWORD "YOUR_HOTSPOT_PASSWORD"
+#endif
+
+#ifndef WIFI_CONNECT_TIMEOUT_MS
+#define WIFI_CONNECT_TIMEOUT_MS 15000
+#endif
+
+#ifndef AP_SSID
+#define AP_SSID "ESP32_DIEM_DANH"
+#endif
+
+#ifndef AP_PASSWORD
+#define AP_PASSWORD "12345678"
+#endif
+
+#ifndef CAMERA_HOSTNAME
+#define CAMERA_HOSTNAME "esp32cam"
+#endif
+
+#ifndef WIFI_TX_POWER_MAX
+#define WIFI_TX_POWER_MAX 1
+#endif
+
+static bool is_sta_mode = false;
+static volatile uint32_t stream_frame_count = 0;
+static uint32_t stream_fps = 0;
 
 // ========================================================
 // 2. CAU HINH CHAN CAMERA AI-THINKER ESP32-CAM
@@ -83,6 +111,7 @@ static esp_err_t stream_handler(httpd_req_t *req) {
         if(res != ESP_OK) {
             break;
         }
+        stream_frame_count++;
     }
     return res;
 }
@@ -103,23 +132,206 @@ static esp_err_t capture_handler(httpd_req_t *req) {
     return res;
 }
 
+// Ten cam bien theo ma PID (so thuan de bien dich duoc voi moi phien ban core esp32)
+static const char* sensor_name(unsigned pid) {
+    switch (pid) {
+        case 0x26:   return "OV2640";
+        case 0x3660: return "OV3660";
+        case 0x5640: return "OV5640";
+        default:     return "khac";
+    }
+}
+
+// Kich thuoc khung hinh thuc te (pixel) cua do phan giai dang chay
+static void frame_dims(sensor_t *s, unsigned *w, unsigned *h) {
+    *w = 0;
+    *h = 0;
+    if (s->status.framesize < FRAMESIZE_INVALID) {
+        *w = resolution[s->status.framesize].width;
+        *h = resolution[s->status.framesize].height;
+    }
+}
+
 // 3. XU LY THONG TIN TRANG THAI CAM BIEN (/status) GIONG CameraWebServer
 static esp_err_t status_handler(httpd_req_t *req) {
-    static char json_response[128];
+    static char json_response[1024];
     sensor_t * s = esp_camera_sensor_get();
     if (s == NULL) {
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
-    snprintf(json_response, sizeof(json_response),
-             "{\"framesize\":%u,\"quality\":%u,\"psram\":%s}",
-             s->status.framesize, s->status.quality, psramFound() ? "true" : "false");
+    String ip_str = is_sta_mode ? WiFi.localIP().toString() : WiFi.softAPIP().toString();
+    char rssi_str[12];
+    if (is_sta_mode) {
+        snprintf(rssi_str, sizeof(rssi_str), "%d", (int)WiFi.RSSI());
+    } else {
+        snprintf(rssi_str, sizeof(rssi_str), "null");
+    }
+    unsigned width = 0, height = 0;
+    frame_dims(s, &width, &height);
+
+    int n = snprintf(json_response, sizeof(json_response),
+             "{\"framesize\":%u,\"width\":%u,\"height\":%u,\"quality\":%u,\"psram\":%s,"
+             "\"wifi_mode\":\"%s\",\"ip\":\"%s\",\"rssi\":%s,\"hostname\":\"%s\","
+             "\"stream_fps\":%u,\"free_heap\":%u,\"uptime_s\":%u,"
+             "\"sensor\":\"%s\",\"sensor_pid\":\"0x%x\","
+             "\"awb\":%u,\"awb_gain\":%u,\"wb_mode\":%u,"
+             "\"aec\":%u,\"aec2\":%u,\"ae_level\":%d,\"aec_value\":%u,"
+             "\"agc\":%u,\"agc_gain\":%u,\"gainceiling\":%u,"
+             "\"brightness\":%d,\"contrast\":%d,\"saturation\":%d,\"sharpness\":%d,"
+             "\"special_effect\":%u,\"lenc\":%u,\"raw_gma\":%u,\"bpc\":%u,\"wpc\":%u,\"dcw\":%u,"
+             "\"vflip\":%u,\"hmirror\":%u}",
+             (unsigned)s->status.framesize, width, height, (unsigned)s->status.quality,
+             psramFound() ? "true" : "false",
+             is_sta_mode ? "sta" : "ap", ip_str.c_str(), rssi_str, CAMERA_HOSTNAME,
+             (unsigned)stream_fps, (unsigned)ESP.getFreeHeap(), (unsigned)(millis() / 1000),
+             sensor_name(s->id.PID), (unsigned)s->id.PID,
+             (unsigned)s->status.awb, (unsigned)s->status.awb_gain, (unsigned)s->status.wb_mode,
+             (unsigned)s->status.aec, (unsigned)s->status.aec2, (int)s->status.ae_level, (unsigned)s->status.aec_value,
+             (unsigned)s->status.agc, (unsigned)s->status.agc_gain, (unsigned)s->status.gainceiling,
+             (int)s->status.brightness, (int)s->status.contrast, (int)s->status.saturation, (int)s->status.sharpness,
+             (unsigned)s->status.special_effect, (unsigned)s->status.lenc, (unsigned)s->status.raw_gma,
+             (unsigned)s->status.bpc, (unsigned)s->status.wpc, (unsigned)s->status.dcw,
+             (unsigned)s->status.vflip, (unsigned)s->status.hmirror);
+    if (n < 0 || n >= (int)sizeof(json_response)) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-    return httpd_resp_send(req, json_response, strlen(json_response));
+    return httpd_resp_send(req, json_response, n);
 }
 
-// 4. XU LY NHAY DEN FLASH KHI DIEM DANH THANH CONG (/flash)
+// Tra loi 400 kem ly do cho /control
+static esp_err_t control_error(httpd_req_t *req, const char *message) {
+    char body[96];
+    snprintf(body, sizeof(body), "{\"ok\":false,\"error\":\"%s\"}", message);
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    return httpd_resp_send(req, body, HTTPD_RESP_USE_STRLEN);
+}
+
+// Doi ten do phan giai thanh ma enum. Dung TEN (QVGA/CIF/HVGA/VGA) thi khong phu thuoc
+// phien ban core esp32, vi so thu tu enum khac nhau giua cac phien ban.
+static int framesize_from_text(const char *text) {
+    if (strcasecmp(text, "QVGA") == 0) return FRAMESIZE_QVGA;
+    if (strcasecmp(text, "CIF") == 0)  return FRAMESIZE_CIF;
+    if (strcasecmp(text, "HVGA") == 0) return FRAMESIZE_HVGA;
+    if (strcasecmp(text, "VGA") == 0)  return FRAMESIZE_VGA;
+    return -1;
+}
+
+// Mot bien so nguyen cua /control: kiem tra khoang hop le roi goi ham set_* cua cam bien
+#define CONTROL_INT_VAR(NAME, LOW, HIGH, CALL)                                   \
+    else if (strcmp(variable, NAME) == 0) {                                      \
+        if (!has_int || val < (LOW) || val > (HIGH)) {                           \
+            return control_error(req, "Invalid value");                          \
+        }                                                                        \
+        rc = (CALL);                                                             \
+    }
+
+// 4. XU LY DIEU KHIEN THONG SO CAM BIEN (/control?var=...&val=...)
+static esp_err_t control_handler(httpd_req_t *req) {
+    char *buf = NULL;
+    size_t buf_len = httpd_req_get_url_query_len(req) + 1;
+    if (buf_len <= 1) {
+        return control_error(req, "Missing query parameters");
+    }
+    buf = (char *)malloc(buf_len);
+    if (!buf) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    if (httpd_req_get_url_query_str(req, buf, buf_len) != ESP_OK) {
+        free(buf);
+        return control_error(req, "Invalid query");
+    }
+
+    char variable[32] = {0};
+    char value[32] = {0};
+    if (httpd_query_key_value(buf, "var", variable, sizeof(variable)) != ESP_OK ||
+        httpd_query_key_value(buf, "val", value, sizeof(value)) != ESP_OK) {
+        free(buf);
+        return control_error(req, "Missing var or val");
+    }
+    free(buf);
+
+    char *value_end = NULL;
+    long parsed = strtol(value, &value_end, 10);
+    bool has_int = (value_end != value && *value_end == '\0');
+    int val = has_int ? (int)parsed : 0;
+
+    sensor_t *s = esp_camera_sensor_get();
+    if (s == NULL) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    int rc = 0;
+    if (strcmp(variable, "framesize") == 0) {
+        int fs = framesize_from_text(value);
+        if (fs < 0 && has_int) {
+            fs = val;
+        }
+        bool valid = (fs == FRAMESIZE_QVGA);
+        if (psramFound() && (fs == FRAMESIZE_CIF || fs == FRAMESIZE_HVGA || fs == FRAMESIZE_VGA)) {
+            valid = true;
+        }
+        if (!valid) {
+            return control_error(req, "Invalid framesize");
+        }
+        rc = s->set_framesize(s, (framesize_t)fs);
+    } else if (strcmp(variable, "quality") == 0) {
+        if (!has_int || val < 10 || val > 30) {
+            return control_error(req, "Invalid quality");
+        }
+        rc = s->set_quality(s, val);
+    }
+    CONTROL_INT_VAR("awb", 0, 1, s->set_whitebal(s, val))
+    CONTROL_INT_VAR("awb_gain", 0, 1, s->set_awb_gain(s, val))
+    CONTROL_INT_VAR("wb_mode", 0, 4, s->set_wb_mode(s, val))
+    CONTROL_INT_VAR("aec", 0, 1, s->set_exposure_ctrl(s, val))
+    CONTROL_INT_VAR("aec2", 0, 1, s->set_aec2(s, val))
+    CONTROL_INT_VAR("ae_level", -2, 2, s->set_ae_level(s, val))
+    CONTROL_INT_VAR("aec_value", 0, 1200, s->set_aec_value(s, val))
+    CONTROL_INT_VAR("agc", 0, 1, s->set_gain_ctrl(s, val))
+    CONTROL_INT_VAR("agc_gain", 0, 30, s->set_agc_gain(s, val))
+    CONTROL_INT_VAR("gainceiling", 0, 6, s->set_gainceiling(s, (gainceiling_t)val))
+    CONTROL_INT_VAR("brightness", -2, 2, s->set_brightness(s, val))
+    CONTROL_INT_VAR("contrast", -2, 2, s->set_contrast(s, val))
+    CONTROL_INT_VAR("saturation", -2, 2, s->set_saturation(s, val))
+    CONTROL_INT_VAR("sharpness", -2, 2, s->set_sharpness(s, val))
+    CONTROL_INT_VAR("special_effect", 0, 6, s->set_special_effect(s, val))
+    CONTROL_INT_VAR("lenc", 0, 1, s->set_lenc(s, val))
+    CONTROL_INT_VAR("raw_gma", 0, 1, s->set_raw_gma(s, val))
+    CONTROL_INT_VAR("bpc", 0, 1, s->set_bpc(s, val))
+    CONTROL_INT_VAR("wpc", 0, 1, s->set_wpc(s, val))
+    CONTROL_INT_VAR("dcw", 0, 1, s->set_dcw(s, val))
+    CONTROL_INT_VAR("vflip", 0, 1, s->set_vflip(s, val))
+    CONTROL_INT_VAR("hmirror", 0, 1, s->set_hmirror(s, val))
+    else {
+        return control_error(req, "Unknown variable");
+    }
+
+    if (rc != 0) {
+        // Cam bien khong nhan gia tri nay (vi du OV2640 khong ho tro sharpness)
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    unsigned width = 0, height = 0;
+    frame_dims(s, &width, &height);
+    char response[160];
+    snprintf(response, sizeof(response),
+             "{\"ok\":true,\"framesize\":%u,\"width\":%u,\"height\":%u,\"quality\":%u}",
+             (unsigned)s->status.framesize, width, height, (unsigned)s->status.quality);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    return httpd_resp_send(req, response, strlen(response));
+}
+
+// 5. XU LY NHAY DEN FLASH KHI DIEM DANH THANH CONG (/flash)
 void flash_task(void *pvParameters) {
     digitalWrite(FLASH_GPIO_NUM, HIGH); // Bat den Flash
     vTaskDelay(pdMS_TO_TICKS(150));     // Sang trong 150ms
@@ -128,7 +340,7 @@ void flash_task(void *pvParameters) {
 }
 
 static esp_err_t flash_handler(httpd_req_t *req) {
-    // Tao task FreeRTOS chay ngam chớp đèn, không chặn luồng video stream
+    // Tao task FreeRTOS chay ngam chop den, khong chan luong video stream
     xTaskCreate(flash_task, "flash_task", 1024, NULL, 1, NULL);
     httpd_resp_set_type(req, "text/plain");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -139,7 +351,7 @@ void startCameraServer() {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.max_uri_handlers = 8;
 
-    // Server 1 (Port 80): phuc vu /capture, /status, /flash (giong CameraWebServer)
+    // Server 1 (Port 80): phuc vu /capture, /status, /control, /flash (giong CameraWebServer)
     config.server_port = 80;
     config.ctrl_port = 32768;
 
@@ -157,6 +369,13 @@ void startCameraServer() {
         .user_ctx  = NULL
     };
 
+    httpd_uri_t control_uri = {
+        .uri       = "/control",
+        .method    = HTTP_GET,
+        .handler   = control_handler,
+        .user_ctx  = NULL
+    };
+
     httpd_uri_t flash_uri = {
         .uri       = "/flash",
         .method    = HTTP_GET,
@@ -167,6 +386,7 @@ void startCameraServer() {
     if (httpd_start(&camera_httpd, &config) == ESP_OK) {
         httpd_register_uri_handler(camera_httpd, &capture_uri);
         httpd_register_uri_handler(camera_httpd, &status_uri);
+        httpd_register_uri_handler(camera_httpd, &control_uri);
         httpd_register_uri_handler(camera_httpd, &flash_uri);
     }
 
@@ -195,7 +415,7 @@ void setup() {
 
     Serial.begin(9600);
     delay(500);
-    Serial.println("\n--- DANG KHOI DONG ESP32-CAM (CHE DO TU PHAT WI-FI) ---");
+    Serial.println("\n--- DANG KHOI DONG ESP32-CAM ---");
 
     pinMode(LED_BUILTIN_RED, OUTPUT);
     digitalWrite(LED_BUILTIN_RED, HIGH); // Tat den ban dau
@@ -229,7 +449,8 @@ void setup() {
     // Kiem tra ho tro PSRAM de toi uu hoa frame buffer
     // Nguon: CameraWebServer.ino trong arduino-esp32 & esp_camera.h
     if (psramFound()) {
-        config.frame_size = FRAMESIZE_CIF;  // 400x296: do phan giai toi uu nhe may 25-30 FPS
+        // Init o VGA de cap san bo dem lon trong PSRAM, tranh tran bo dem FB-OVF khi doi do phan giai qua /control
+        config.frame_size = FRAMESIZE_VGA;
         config.jpeg_quality = 12;           // 10-12 la dai tieu chuan cua CameraWebServer
         config.fb_count = 2;                // Double buffer trong PSRAM tranh xe hinh
         config.fb_location = CAMERA_FB_IN_PSRAM;
@@ -249,10 +470,18 @@ void setup() {
     }
 
     // ========================================================
-    // CAU HINH CAM BIEN OV2640: KHU AM XANH, CAN BANG TRANG, CHONG NHIEU
+    // CAU HINH CAM BIEN: DO PHAN GIAI, CAN BANG TRANG, PHOI SANG, CHONG NHIEU
     // ========================================================
     sensor_t * s = esp_camera_sensor_get();
     if (s != NULL) {
+        Serial.printf("Cam bien: %s (PID 0x%x)\n", sensor_name(s->id.PID), (unsigned)s->id.PID);
+
+        // Dat do phan giai chay TRUOC, roi moi dat mau va phoi sang, de cac thong so mau
+        // khong bi ghi de khi cam bien doi che do. Bo dem da cap san co VGA nen /control doi len VGA duoc.
+        if (psramFound()) {
+            s->set_framesize(s, FRAMESIZE_CIF);
+        }
+
         s->set_whitebal(s, 1);       // 1 = Bat Auto White Balance (Can bang trang tu dong)
         s->set_awb_gain(s, 1);       // 1 = Bat AWB Gain (Tang do nhay can bang mau)
         s->set_wb_mode(s, 0);        // 0 = Auto (Tu dong dieu chinh theo anh sang phong)
@@ -269,32 +498,117 @@ void setup() {
         s->set_bpc(s, 1);            // 1 = Khu diem chet den (Black pixel correction)
         s->set_wpc(s, 1);            // 1 = Khu diem chet trang (White pixel correction)
         s->set_dcw(s, 1);            // 1 = Chuan hoa ma tran mau sac
+
+        // OV3660 can cac thong so rieng (theo CameraWebServer.ino cua Espressif)
+        if (s->id.PID == 0x3660) {
+            s->set_vflip(s, 1);
+            s->set_brightness(s, 1);
+            s->set_saturation(s, -2);
+        }
+
+        unsigned width = 0, height = 0;
+        frame_dims(s, &width, &height);
+        Serial.printf("Do phan giai: %ux%u (ma %u)\n", width, height, (unsigned)s->status.framesize);
+
+        // Bo cac khung hinh dau trong 0,8 giay de can bang trang va phoi sang kip on dinh
+        unsigned long warmup_start = millis();
+        while (millis() - warmup_start < 800) {
+            camera_fb_t *warmup_fb = esp_camera_fb_get();
+            if (warmup_fb) {
+                esp_camera_fb_return(warmup_fb);
+            } else {
+                delay(10);
+            }
+        }
     }
 
-    // KHOI TAO DIEM PHAT SONG ACCESS POINT
-    WiFi.mode(WIFI_AP);
-    bool ap_ok = WiFi.softAP(ap_ssid, ap_password);
-    if (!ap_ok) {
-        Serial.println("Loi tao diem phat song Wi-Fi!");
-        return;
+    // ========================================================
+    // KHOI TAO WI-FI: THU KET NOI STA TRUOC, THAT BAI VE AP
+    // ========================================================
+    bool should_try_sta = (strlen(WIFI_SSID) > 0 && strcmp(WIFI_SSID, "YOUR_PHONE_HOTSPOT") != 0);
+
+    if (should_try_sta) {
+        Serial.printf("Dang ket noi Wi-Fi STA toi: %s ...\n", WIFI_SSID);
+        WiFi.mode(WIFI_STA);
+        WiFi.setHostname(CAMERA_HOSTNAME);
+        WiFi.setSleep(false);
+        WiFi.setAutoReconnect(true);
+        WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+        unsigned long start_attempt = millis();
+        bool led_state = false;
+        while (WiFi.status() != WL_CONNECTED && (millis() - start_attempt < WIFI_CONNECT_TIMEOUT_MS)) {
+            led_state = !led_state;
+            digitalWrite(LED_BUILTIN_RED, led_state ? LOW : HIGH);
+            delay(200);
+            Serial.print(".");
+        }
+        digitalWrite(LED_BUILTIN_RED, HIGH);
+        Serial.println();
+
+        if (WiFi.status() == WL_CONNECTED) {
+            is_sta_mode = true;
+            esp_wifi_set_ps(WIFI_PS_NONE);
+            if (WIFI_TX_POWER_MAX) {
+                WiFi.setTxPower(WIFI_POWER_19_5dBm);
+            }
+            MDNS.begin(CAMERA_HOSTNAME);
+            MDNS.addService("http", "tcp", 80);
+        } else {
+            Serial.println("Ket noi Wi-Fi STA that bai hoac qua thoi gian! Chuyen ve che do AP...");
+            WiFi.disconnect(true);
+            WiFi.mode(WIFI_AP);
+            WiFi.setSleep(false);
+            if (!WiFi.softAP(AP_SSID, AP_PASSWORD)) {
+                Serial.println("Loi tao diem phat song Wi-Fi AP!");
+                return;
+            }
+            is_sta_mode = false;
+        }
+    } else {
+        WiFi.mode(WIFI_AP);
+        WiFi.setSleep(false);
+        if (!WiFi.softAP(AP_SSID, AP_PASSWORD)) {
+            Serial.println("Loi tao diem phat song Wi-Fi AP!");
+            return;
+        }
+        is_sta_mode = false;
     }
 
     startCameraServer();
 
+    IPAddress ip = is_sta_mode ? WiFi.localIP() : WiFi.softAPIP();
+
     Serial.println("\n========================================");
-    Serial.println(">>> ESP32 PHAT WI-FI THANH CONG! <<<");
-    Serial.print("TEN WI-FI: ");
-    Serial.println(ap_ssid);
-    Serial.print("MAT KHAU: ");
-    Serial.println(ap_password);
-    Serial.print("DIA CHI IP CO DINH: ");
-    Serial.println(WiFi.softAPIP());
+    if (is_sta_mode) {
+        Serial.println(">>> ESP32 KET NOI WI-FI THANH CONG! <<<");
+        Serial.println("CHE DO: STA (hotspot)");
+        Serial.print("SSID: ");
+        Serial.println(WIFI_SSID);
+        Serial.print("RSSI: ");
+        Serial.print(WiFi.RSSI());
+        Serial.println(" dBm");
+    } else {
+        Serial.println(">>> ESP32 PHAT WI-FI THANH CONG! <<<");
+        Serial.println("CHE DO: AP (tu phat)");
+        Serial.print("TEN WI-FI (SSID): ");
+        Serial.println(AP_SSID);
+        Serial.print("MAT KHAU: ");
+        Serial.println(AP_PASSWORD);
+    }
+    Serial.print("DIA CHI IP: ");
+    Serial.println(ip);
     Serial.print("PORT 80 (CAPTURE/STATUS): http://");
-    Serial.print(WiFi.softAPIP());
+    Serial.print(ip);
     Serial.println("/capture");
     Serial.print("PORT 81 (STREAM MJPEG):    http://");
-    Serial.print(WiFi.softAPIP());
+    Serial.print(ip);
     Serial.println(":81/stream");
+    if (is_sta_mode) {
+        Serial.print("MDNS URL (STREAM MJPEG):   http://");
+        Serial.print(CAMERA_HOSTNAME);
+        Serial.println(".local:81/stream");
+    }
     Serial.println("========================================\n");
 
     // Nhap nhay den LED bao san sang
@@ -307,5 +621,15 @@ void setup() {
 }
 
 void loop() {
-    delay(10000);
+    static unsigned long last_fps_calc = 0;
+    static uint32_t last_frame_count = 0;
+
+    unsigned long now = millis();
+    if (now - last_fps_calc >= 1000) {
+        uint32_t current_count = stream_frame_count;
+        stream_fps = current_count - last_frame_count;
+        last_frame_count = current_count;
+        last_fps_calc = now;
+    }
+    delay(50);
 }

@@ -19,5 +19,6 @@ class ImportResult(BaseModel):
     created: int
     updated: int
     skipped: int
+    filtered_out: int = 0
     errors: list[ImportError] = Field(default_factory=list)
     rows: list[dict[str, Any]] = Field(default_factory=list)

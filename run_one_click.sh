@@ -23,6 +23,7 @@ else
 fi
 
 # 2. Khởi chạy Backend FastAPI ngầm
+fuser -k 8000/tcp 2>/dev/null || true
 echo "[2/4] Đang khởi chạy Máy chủ FastAPI tại cổng 8000..."
 python3 -m uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8000 > /tmp/btl_backend.log 2>&1 &
 BACKEND_PID=$!
@@ -72,7 +73,7 @@ if [ "$choice" = "2" ]; then
     echo -e "\n-> Đang kết nối Webcam Laptop..."
     python3 camera_bridge.py --webcam
 else
-    echo -e "\n-> Đang kết nối Camera ESP32-CAM (Wi-Fi SoftAP)..."
-    echo "Lưu ý: Nhớ kết nối laptop vào Wi-Fi 'ESP32_DIEM_DANH' (pass: 12345678)"
-    python3 camera_bridge.py
+    echo -e "\n-> Đang tìm và kết nối Camera ESP32-CAM (hotspot điện thoại hoặc Wi-Fi tự phát)..."
+    echo "Lưu ý: laptop và camera phải cùng mạng (hotspot 'nycarag'), hoặc laptop nối Wi-Fi 'ESP32_DIEM_DANH' nếu camera tự phát."
+    bash "$SCRIPT_DIR/start_esp32.sh"
 fi

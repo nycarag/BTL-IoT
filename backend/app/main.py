@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 import logging
 import os
@@ -18,12 +19,14 @@ from app.api import (
     roster_io,
     schedules,
     sessions,
+    settings as settings_api,
     students,
     websocket,
 )
 from app.core.config import ROOT_DIR, settings
 from app.core.middleware import install_security_headers
 from app.database import init_db
+from app.services.auto_session import run_forever
 from app.services.bridge_control import bridge
 
 DEFAULT_DEVICE_TOKEN = "esp32_device_secret_token_ptit"
@@ -85,9 +88,18 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(application):
         init_db()
+        task = None
+        if settings.auto_session_enabled:
+            task = asyncio.create_task(run_forever())
         try:
             yield
         finally:
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
             bridge.stop()
 
     application = FastAPI(
@@ -117,6 +129,7 @@ def create_app() -> FastAPI:
     application.include_router(attendance.router, prefix="/api")
     application.include_router(export.router, prefix="/api")
     application.include_router(audit.router, prefix="/api")
+    application.include_router(settings_api.router, prefix="/api")
     application.include_router(websocket.router)
 
     @application.get("/health")
