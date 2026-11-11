@@ -38,12 +38,12 @@ echo "URL Camera đang sử dụng:"
 echo "  - Chụp ảnh (Capture): $CAMERA_CAPTURE_URL"
 echo "  - Luồng video (Stream): $CAMERA_STREAM_URL"
 
-# Tự động gửi lệnh tối ưu siêu mượt (CIF + Quality 14) qua API /control
+# Tự động gửi lệnh tối ưu siêu mượt (QVGA 320x240 + Quality 16) qua API /control
 CAM_IP=$(echo "$CAMERA_CAPTURE_URL" | sed -E 's|https?://([^:/]+).*|\1|')
 if [ -n "$CAM_IP" ]; then
-    echo "-> Đang áp cấu hình siêu mượt (CIF 400x296, Quality 14) tới camera..."
-    curl -s -m 2 "http://${CAM_IP}/control?var=framesize&val=CIF" >/dev/null 2>&1 || true
-    curl -s -m 2 "http://${CAM_IP}/control?var=quality&val=14" >/dev/null 2>&1 || true
+    echo "-> Đang áp cấu hình siêu mượt (QVGA 320x240, Quality 16) tới camera..."
+    curl -s -m 2 "http://${CAM_IP}/control?var=framesize&val=QVGA" >/dev/null 2>&1 || true
+    curl -s -m 2 "http://${CAM_IP}/control?var=quality&val=16" >/dev/null 2>&1 || true
 fi
 
 cd "$SCRIPT_DIR/backend"

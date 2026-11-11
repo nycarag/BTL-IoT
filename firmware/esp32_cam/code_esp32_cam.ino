@@ -479,7 +479,8 @@ void setup() {
         // Dat do phan giai chay TRUOC, roi moi dat mau va phoi sang, de cac thong so mau
         // khong bi ghi de khi cam bien doi che do. Bo dem da cap san co VGA nen /control doi len VGA duoc.
         if (psramFound()) {
-            s->set_framesize(s, FRAMESIZE_CIF);
+            s->set_framesize(s, FRAMESIZE_QVGA);
+            s->set_quality(s, 16);
         }
 
         s->set_whitebal(s, 1);       // 1 = Bat Auto White Balance (Can bang trang tu dong)
