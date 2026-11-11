@@ -1,6 +1,25 @@
 # Hệ Thống Điểm Danh Sinh Viên AIoT
 
-Hệ thống điểm danh sinh viên tự động thu nhận hình ảnh từ ESP32-CAM (hoặc webcam), xử lý qua máy chủ FastAPI và hiển thị kết quả thời gian thực trên giao diện React kiosk. Quá trình nhận diện kết hợp phát hiện khuôn mặt, kiểm tra chớp mắt, chống giả mạo và đối soát danh tính theo danh sách lớp.
+Sinh viên đứng trước ESP32-CAM, hệ thống nhận ra khuôn mặt, loại ảnh giả, rồi ghi điểm danh vào đúng ca học đang mở. Camera chỉ chụp và phát hình; toàn bộ AI chạy trên máy chủ FastAPI, kết quả hiện ngay trên màn hình kiosk React.
+
+## Hệ thống làm được gì
+
+| Việc | Cách làm | Mã nguồn |
+|---|---|---|
+| Điểm danh bằng khuôn mặt | ESP32-CAM phát MJPEG, máy chủ chạy 4 chặng: tìm mặt, lọc ổn định, chống giả mạo, so khớp danh tính trong lớp | `backend/app/api/attendance.py` |
+| Chống điểm danh hộ | MiniFASNetV2 loại ảnh in và màn hình điện thoại; tùy chọn bắt chớp mắt (EAR) | `backend/app/services/antispoof.py`, `liveness.py` |
+| Ca điểm danh theo lịch học | Nhập thời khóa biểu `.ics`, đến giờ ca tự mở, hết giờ tự đóng và ghi vắng; lịch đang trong giờ thì ca mở ngay khi lưu | `backend/app/services/auto_session.py`, `session_lifecycle.py` |
+| Đi muộn | Tính từ giờ bắt đầu buổi học, ngưỡng mặc định 15 phút, đổi trên giao diện và tự tính lại bản ghi cũ | `backend/app/api/settings.py` |
+| Kiosk thời gian thực | Hình camera qua WebSocket, khung mặt 4 màu theo trạng thái, tiếng bíp khi điểm danh xong | `frontend/src/KioskView.tsx` |
+| Quản trị | Sinh viên, lớp, buổi học, thiết bị và vùng nhận diện (ROI), xác minh thủ công, nhật ký xác thực, nhật ký quản trị | `frontend/src/App.tsx` |
+| Nhập và xuất dữ liệu | Sinh viên và lịch học qua CSV, XLSX, iCalendar; có bước xem trước, báo lỗi theo từng dòng | `backend/app/api/roster_io.py`, `schedules.py` |
+| Bảo mật | Băm mật khẩu PBKDF2, khóa đăng nhập sai, thu hồi token, header an toàn, từ chối cấu hình yếu ở production | `backend/app/core/security.py` |
+
+Số đo ngày 11/11/2026 trên máy demo (máy ảo 2 CPU), chi tiết ở [docs/test-report.md](docs/test-report.md):
+
+- 215 bài kiểm thử tự động đều đạt; kịch bản đầu-cuối 14/14 bước.
+- Lưu một lịch đang trong giờ học, ca điểm danh mở sau khoảng 20 ms.
+- Trong lúc nhận diện, máy chủ vẫn trả lời dưới 30 ms ở 1096/1096 lần đo. Trước khi tách bước trích vector khuôn mặt sang tiến trình riêng, 17/923 lần bị trễ khoảng 75 ms.
 
 ## Thông tin nhóm
 
@@ -28,9 +47,9 @@ YuNet ➔ Stability ➔ MiniFASNet ➔ dlib                            SQLite / 
 | Tầng hệ thống | Công nghệ sử dụng | Vai trò & Đặc điểm chính |
 | :--- | :--- | :--- |
 | **Frontend (FE)** | React 18, TypeScript, Vite, CSS thuần | Giao diện Kiosk & Quản trị. Vẽ khung mặt Canvas client-side, Web Audio phát tiếng beep, WebSocket nhận diện realtime. |
-| **Backend (BE)** | FastAPI (Python 3.12), Uvicorn, Pydantic | API async hiệu năng cao. Xác thực PBKDF2 (100k rounds), JWT có JTI revoke, middleware bảo mật pure ASGI, rate-limiting. |
-| **Cơ sở dữ liệu (DB)** | SQLite 3, SQLAlchemy 2.0 ORM | Nhẹ, nhúng trực tiếp, write-lock `BEGIN IMMEDIATE`. Lưu vector 128D dạng JSON, so khớp Euclid cực nhanh qua NumPy. |
-| **IoT & Edge Camera** | ESP32-CAM (AI-Thinker OV2640), C++ FreeRTOS | Tách cổng 80 (Snapshot/Lệnh) & 81 (Stream MJPEG). Cầu nối `camera_bridge.py` đệm khung hình mới nhất chống trôi trễ. |
+| **Backend (BE)** | FastAPI (Python 3.12), Uvicorn, Pydantic | API async. Mật khẩu băm PBKDF2 (600.000 vòng), token có `jti` để thu hồi, middleware header bảo mật, giới hạn thử đăng nhập. Trích vector khuôn mặt chạy ở tiến trình con. |
+| **Cơ sở dữ liệu (DB)** | SQLite 3, SQLAlchemy 2.0 ORM | Nhúng trực tiếp, chế độ WAL, khóa ghi `BEGIN IMMEDIATE`. Lưu vector 128D dạng JSON, so khớp Euclid bằng NumPy. |
+| **IoT & Edge Camera** | ESP32-CAM (AI-Thinker OV2640), C++ FreeRTOS | Bắt hotspot, tự phát Wi-Fi dự phòng khi không nối được. Cổng 80 cho ảnh chụp, trạng thái và lệnh chỉnh cảm biến (`/capture`, `/status`, `/control`); cổng 81 cho luồng MJPEG. Cầu nối `camera_bridge.py` chỉ giữ khung hình mới nhất để hình không trôi trễ. |
 
 ## Pipeline nhận diện khuôn mặt (4 chặng nối tiếp)
 
@@ -85,13 +104,15 @@ Các tham số được nạp từ file `.env`, định nghĩa tại `backend/ap
 | `PAD_REAL_THRESHOLD` | `0.45` | Điểm MiniFASNet tối thiểu để coi là khuôn mặt thật. |
 | `RECOGNITION_THRESHOLD` | `0.52` | Ngưỡng khoảng cách Euclid để chấp nhận khớp khuôn mặt. |
 | `RECOGNITION_MARGIN` | `0.05` | Chênh lệch khoảng cách tối thiểu giữa hai ứng viên gần nhất. |
-| `LIVENESS_MODE` | `passive` | Chế độ chống giả mạo: `passive` (chạy mô hình MiniFASNetV2 1-frame siêu mượt), `blink` (bắt chớp mắt EAR), hoặc `off`. |
-| `AUTO_SESSION_ENABLED` | `true` | Bật tiến trình nền tự động mở và đóng ca điểm danh theo lịch học. |
+| `LIVENESS_MODE` | `blink` | `blink`: ngoài MiniFASNetV2 còn bắt chớp mắt (EAR). Giá trị khác, ví dụ `passive`: chỉ dùng MiniFASNetV2 trên một khung hình. Buổi demo đặt `passive`. |
+| `AUTO_SESSION_ENABLED` | `true` | Bật tiến trình nền tự động mở và đóng ca điểm danh theo lịch học. Lịch đang trong giờ học thì ca mở ngay khi lưu. |
+| `AUTO_SESSION_INTERVAL_SECONDS` | `30` | Chu kỳ quét của tiến trình nền trên (5 đến 300 giây). |
+| `RECOGNITION_PROCESS` | `true` | Trích vector khuôn mặt trong tiến trình con, để luồng camera không khựng lúc nhận diện. |
 | `LATE_AFTER_MINUTES` | `15` | Ngưỡng tính đi muộn (phút); có thể chỉnh động trực tiếp trên giao diện web. |
-| `STABLE_FRAMES` | `1` | Số khung hình ổn định liên tiếp trước khi nhận diện (1 = nhận diện tức thì). |
-| `FRAME_INTERVAL_SECONDS` | `0.3` | Khoảng cách lấy mẫu giữa hai khung hình gửi vào mô hình AI. |
+| `STABLE_FRAMES` | `3` | Số khung hình ổn định liên tiếp trước khi nhận diện. Buổi demo đặt `1`. |
+| `FRAME_INTERVAL_SECONDS` | `0.3` | Khoảng cách tối thiểu giữa hai khung hình gửi vào mô hình AI. |
 
-Firmware `firmware/esp32_cam_softap/` phục vụ ảnh chụp và trạng thái ở cổng 80 (`/capture`, `/status`), luồng MJPEG ở cổng 81 (`/stream`).
+Firmware chính nằm ở `firmware/esp32_cam/` (bắt hotspot, có Wi-Fi tự phát dự phòng). `firmware/esp32_cam_softap/` là bản chỉ tự phát Wi-Fi, giữ lại để dự phòng.
 
 ## Chống gian lận
 
@@ -126,7 +147,7 @@ Chi tiết các biện pháp và hướng dẫn kiểm tra xem tại [docs/secur
 PYTHONPATH=backend pytest backend/tests -q
 ```
 
-176 passed; E2E 14/14 bước. Chi tiết: [docs/test-report.md](docs/test-report.md).
+215 passed; E2E 14/14 bước. Bộ test dùng CSDL tạm và không đọc `.env`, nên chạy được trên máy đang chứa dữ liệu thật. Chi tiết: [docs/test-report.md](docs/test-report.md).
 
 ## Tài liệu
 

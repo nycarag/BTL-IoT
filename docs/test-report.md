@@ -106,3 +106,13 @@ SV_BIDEN,Joe Biden,2026-11-03 13:15:48,present,"face+pad:0.9999;distance:0.4102"
 | **4g. Kiểm tra tệp rác & dung lượng** | Gửi tệp `.xlsx` hỏng cấu trúc và tệp dung lượng 3 MiB | Tệp hỏng trả lỗi tiếng Việt "Tệp Excel hỏng hoặc không đúng định dạng .xlsx" (máy chủ không crash); tệp vượt ngưỡng trả "Dung lượng tệp vượt quá 2 MiB" | **422 / 413** | **PASS** |
 | **4h. Chặn cấu hình yếu ở production** | Chạy ứng dụng với `APP_ENV=production` và tham số mặc định | Máy chủ phát sinh `RuntimeError` cảnh báo secret/mật khẩu yếu và dừng khởi động | **N/A (Chặn khởi động)** | **PASS** |
 
+
+## Bổ sung 11/11/2026: mở ca ngay khi lưu lịch, giảm khựng luồng camera
+
+- Lệnh: `PYTHONPATH=backend .venv/bin/python -m pytest backend/tests -q`. Kết quả: **215 passed, 2 warnings** trong 39 giây (máy ảo 2 CPU, có cài dlib).
+- `backend/tests/conftest.py` cô lập bộ test khỏi máy chạy: CSDL mặc định trỏ vào thư mục tạm và không nạp `.env`. Trước đó, 3 test chạy lifespan thật khiến bộ hẹn giờ ca tự động ghi vào `data/attendance.db`, và `.env` của buổi demo (`STABLE_FRAMES=1`, `LIVENESS_MODE=passive`) làm 7 test về cổng ổn định và chớp mắt báo đỏ.
+- Test mới: `test_schedule_autostart.py` (5 test: lưu, sửa, nhập lịch đang trong giờ thì ca mở ngay; lịch tương lai thì không; dashboard đang xem buổi khác vẫn nhận sự kiện) và `test_hot_path.py` (4 test: SQLite chạy WAL; trích vector trong tiến trình con cho cùng kết quả; tiến trình con hỏng thì quay về chạy trong luồng).
+- Đo trên server thật (cổng thử, CSDL tạm, 16 khung AI có mặt người, PAD đặt luôn đạt). Khi trích vector chạy trong luồng của server, `GET /health` vượt 30 ms ở 17/923 lần gọi, p99 77,5 ms. Khi chạy trong tiến trình con: 0/1096 lần, p99 9,1 ms.
+- Đo commit SQLite trên ổ của máy demo, trung vị 150 lần ghi: 2,04 ms (journal DELETE, synchronous FULL) so với 0,05 ms (WAL, NORMAL).
+- `test_bench_esp32_stream.py::test_mjpeg_stream_metrics_and_stutter` phụ thuộc thời gian: trượt 1 trong 5 lần chạy cả bộ.
+- Chưa đo với camera ESP32 thật: lúc chạy các phép đo trên, camera không bật.
