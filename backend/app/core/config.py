@@ -80,6 +80,11 @@ class Settings:
     cors_origin_regex: str = os.getenv("CORS_ORIGIN_REGEX", DEFAULT_CORS_ORIGIN_REGEX).strip()
     auto_session_enabled: bool = os.getenv("AUTO_SESSION_ENABLED", "true").lower().strip() not in ("0", "false", "no")
     auto_session_interval_seconds: int = max(5, min(300, int(os.getenv("AUTO_SESSION_INTERVAL_SECONDS", "30"))))
+    cloud_sync_url: str = os.getenv("CLOUD_SYNC_URL", "").strip()
+    cloud_sync_token: str = os.getenv("CLOUD_SYNC_TOKEN", "").strip()
+    cloud_sync_interval_seconds: int = max(5, min(300, int(os.getenv("CLOUD_SYNC_INTERVAL_SECONDS", "15"))))
+    gateway_id: str = os.getenv("GATEWAY_ID", "gateway-laptop-01").strip()
+    cloud_sync_backfill: bool = os.getenv("CLOUD_SYNC_BACKFILL", "false").lower().strip() in ("1", "true", "yes")
 
 
 settings = Settings()

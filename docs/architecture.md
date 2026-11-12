@@ -1,13 +1,13 @@
 # Kiến trúc triển khai
 
 ```text
-ESP32-CAM (Firmware tách cổng: 80 Snapshot/Control, 81 Stream MJPEG)
-  ├─ POST heartbeat (token + device ID)
-  ├─ GET config (phiên được gán + active)
-  └─ Cầu nối Camera (camera_bridge.py / BridgeControl quản lý an toàn từ Web)
-       |
+NÚT CAMERA
+  ├─ ESP32-CAM (Firmware tách cổng: 80 Snapshot/Control, 81 Stream MJPEG)
+  ├─ Điện thoại chạy IP camera (start_phone.sh)
+  └─ Webcam laptop (dự phòng)
+       | (Frame video / ảnh chụp qua HTTP)
        v
-Laptop / FastAPI (một process)
+GATEWAY / COORDINATOR (Laptop / FastAPI)
   ├─ token thiết bị (X-Device-Token), assignment và phiên đang mở
   ├─ rate-limit / một ảnh đang xử lý mỗi device
   ├─ giới hạn 5 MiB, JPEG/PNG, 4 MP; decode JPEG 1 lần duy nhất cho toàn pipeline
@@ -18,10 +18,14 @@ Laptop / FastAPI (một process)
   ├─ dlib embedding 128D thô (đa mẫu 1-5 ảnh) → khoảng cách Euclid đa mẫu tối thiểu + ambiguity margin
   ├─ SQLite transaction: BEGIN IMMEDIATE recheck phiên/lớp/assignment/enrollment
   ├─ UNIQUE(session_id, student_id), đúng giờ/đi muộn
-  └─ audit + WebSocket xác thực
-       |
+  ├─ audit + WebSocket xác thực → React dashboard (Canvas HTML5 vẽ box overlay)
+  └─ Tác vụ nền cloud_sync (đọc con trỏ SQLite, gom lô gửi bù)
+       | (POST JSON HTTP 302: điểm danh + thiết bị)
        v
-Nginx /api và /ws → React dashboard (Canvas HTML5 vẽ box overlay từ metadata JSON)
+CLOUD (Google Sheets + Apps Script)
+  ├─ Code.gs (doPost xử lý gom dữ liệu, script lock)
+  ├─ Bảng lưu trữ: DiemDanh, ThietBi
+  └─ Bảng phân tích tự động: ThongKeBuoi, ThongKeSV
 ```
 
 ## Dữ liệu và quyền
@@ -56,6 +60,16 @@ Dịch vụ `BridgeControl` (`backend/app/services/bridge_control.py`) quản l�
 SQLite foreign keys bật, busy timeout 5s. Điểm danh và đổi trạng thái phiên dùng write transaction `BEGIN IMMEDIATE`. Trước insert đọc lại phiên, lớp, assignment và tồn tại enrollment; unique constraint chặn duplicate cả khi request tranh chấp. Duplicate trả created=false, không ghi thêm attendance. Mở/đóng phiên, liveness và attendance phát sự kiện WS; frontend polling phục hồi khi WS mất.
 
 Image inference chạy threadpool để không giữ event loop, mỗi device chỉ xử lý một frame; broadcast có timeout và loại kết nối lỗi. Luồng camera stream WebSocket (`/ws/devices/{id}/camera`) phát metadata JSON (`type: "meta"`) và binary JPEG theo nhịp ACK `"next"`; phía client React vẽ bounding box trực tiếp trên Canvas HTML5 theo tỷ lệ contain chuẩn, loại bỏ hoàn toàn việc vẽ đè lên ảnh ở backend giúp giảm tải CPU máy chủ.
+
+## Tầng cloud và đồng bộ từ gateway
+
+Tầng cloud bổ sung khả năng lưu trữ bản sao điểm danh và tự động phân tích dữ liệu chuyên cần trên Google Sheets thông qua Google Apps Script (`cloud/apps_script/Code.gs`), nâng hệ thống từ mô hình khép kín tại chỗ lên cấp độ IoT Level 5 (xem chi tiết tại [docs/cloud.md](cloud.md)).
+
+Cơ chế đồng bộ hoạt động theo nguyên tắc:
+- Tác vụ nền `cloud_sync` chạy định kỳ ngoài luồng sự kiện chính (`asyncio.to_thread`), không gây nghẽn luồng nhận diện camera.
+- Dùng hai transaction SQLite ngắn: đọc con trỏ và dữ liệu cần gửi, giải phóng kết nối DB trong lúc gọi mạng ra cloud, sau đó mở lại transaction ngắn để cập nhật con trỏ `cloud_last_attendance_id` trong `app_settings`.
+- Mất kết nối mạng không làm mất dữ liệu: con trỏ giữ nguyên và gateway tự động gửi bù khi có mạng trở lại. Cloud dựa vào `event_id` duy nhất để tự động lọc bỏ các bản ghi trùng lặp.
+- Quản trị viên theo dõi trạng thái và kích hoạt đồng bộ tức thời qua hai endpoint `/api/cloud/status` và `/api/cloud/sync-now`.
 
 ## Docker và giới hạn
 

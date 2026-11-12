@@ -48,6 +48,11 @@ def infer_stream_url(capture_url: str) -> str:
     return urlunsplit((scheme, netloc, "/stream", "", ""))
 
 
+def device_name(default: str) -> str:
+    name = os.getenv("CAMERA_DEVICE_NAME", "").strip()
+    return name[:255] if name else default
+
+
 class LatestFrame:
     """One slot shared by independent readers: bounded memory, never a queue."""
     def __init__(self):
@@ -206,7 +211,7 @@ class CameraBridge:
         # Heartbeat means the camera really responded, not merely bridge alive.
         image = self.capture()
         if now >= self.next_heartbeat:
-            self.api("/devices/heartbeat", {"name": "ESP32-CAM · SoftAP bridge", "ip_address": urlparse(self.camera_url).hostname})
+            self.api("/devices/heartbeat", {"name": device_name("ESP32-CAM · SoftAP bridge"), "ip_address": urlparse(self.camera_url).hostname})
             self.next_heartbeat = now + 10
         if now >= self.next_config:
             config = self.api("/devices/config")
@@ -280,7 +285,7 @@ class CameraBridge:
                     start = time.monotonic()
                     try:
                         if start >= heartbeat:
-                            dev_name = "Laptop Webcam Local" if self.cap is not None else "ESP32-CAM · MJPEG bridge"
+                            dev_name = device_name("Laptop Webcam Local" if self.cap is not None else "ESP32-CAM · MJPEG bridge")
                             ip_addr = "127.0.0.1" if self.cap is not None else urlparse(self.camera_url).hostname
                             backend.json("/devices/heartbeat", {"name": dev_name, "ip_address": ip_addr})
                             heartbeat = start + 10
@@ -366,7 +371,7 @@ def main():
         )
         if args.check:
             image = bridge.capture()
-            dev_name = "Laptop Webcam Local" if webcam_id is not None else "ESP32-CAM · SoftAP bridge"
+            dev_name = device_name("Laptop Webcam Local" if webcam_id is not None else "ESP32-CAM · SoftAP bridge")
             ip_addr = "127.0.0.1" if webcam_id is not None else urlparse(bridge.camera_url).hostname
             bridge.api("/devices/heartbeat", {"name": dev_name, "ip_address": ip_addr})
             config = bridge.api("/devices/config")

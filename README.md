@@ -1,6 +1,6 @@
 # Hệ Thống Điểm Danh Sinh Viên AIoT
 
-Sinh viên đứng trước ESP32-CAM, hệ thống nhận ra khuôn mặt, loại ảnh giả, rồi ghi điểm danh vào đúng ca học đang mở. Camera chỉ chụp và phát hình; toàn bộ AI chạy trên máy chủ FastAPI, kết quả hiện ngay trên màn hình kiosk React.
+Sinh viên đứng trước ESP32-CAM, hệ thống nhận ra khuôn mặt, loại ảnh giả, rồi ghi điểm danh vào đúng ca học đang mở. Camera chỉ chụp và phát hình; toàn bộ AI chạy trên máy chủ FastAPI, kết quả hiện ngay trên màn hình kiosk React, đồng thời bản ghi điểm danh được đẩy lên cloud để lưu và thống kê.
 
 ## Hệ thống làm được gì
 
@@ -14,12 +14,17 @@ Sinh viên đứng trước ESP32-CAM, hệ thống nhận ra khuôn mặt, lo�
 | Quản trị | Sinh viên, lớp, buổi học, thiết bị và vùng nhận diện (ROI), xác minh thủ công, nhật ký xác thực, nhật ký quản trị | `frontend/src/App.tsx` |
 | Nhập và xuất dữ liệu | Sinh viên và lịch học qua CSV, XLSX, iCalendar; có bước xem trước, báo lỗi theo từng dòng | `backend/app/api/roster_io.py`, `schedules.py` |
 | Bảo mật | Băm mật khẩu PBKDF2, khóa đăng nhập sai, thu hồi token, header an toàn, từ chối cấu hình yếu ở production | `backend/app/core/security.py` |
+| Đồng bộ lên cloud | Gateway đẩy bản ghi điểm danh lên Google Sheets, Apps Script tính thống kê chuyên cần; mất mạng thì gửi bù | `backend/app/services/cloud_sync.py`, `cloud/apps_script/Code.gs` |
 
-Số đo ngày 11/11/2026 trên máy demo (máy ảo 2 CPU), chi tiết ở [docs/test-report.md](docs/test-report.md):
+Số đo ngày 12/11/2026 trên máy demo (máy ảo 2 CPU), chi tiết ở [docs/test-report.md](docs/test-report.md):
 
-- 215 bài kiểm thử tự động đều đạt; kịch bản đầu-cuối 14/14 bước.
+- 243 bài kiểm thử tự động đều đạt; kịch bản đầu-cuối 14/14 bước.
 - Lưu một lịch đang trong giờ học, ca điểm danh mở sau khoảng 20 ms.
 - Trong lúc nhận diện, máy chủ vẫn trả lời dưới 30 ms ở 1096/1096 lần đo. Trước khi tách bước trích vector khuôn mặt sang tiến trình riêng, 17/923 lần bị trễ khoảng 75 ms.
+
+## Cấp độ IoT
+
+Hệ thống khớp các cột của Level 5 theo bài giảng học phần: lưu trữ trên cloud, phân tích ở cả gateway và cloud, nhiều nút camera, có nút điều phối (gateway) ở mạng cục bộ. Toàn bộ các bước nhận diện khuôn mặt và phát hiện giả mạo thực hiện tại gateway, Google Sheets đóng vai trò lưu trữ bản sao điểm danh và tự động tổng hợp báo cáo chuyên cần. Chi tiết xem tại [docs/cloud.md](docs/cloud.md).
 
 ## Thông tin nhóm
 
@@ -36,12 +41,17 @@ Số đo ngày 11/11/2026 trên máy demo (máy ảo 2 CPU), chi tiết ở [doc
 
 ```text
 [Thiết bị IoT / Camera] ──(HTTP MJPEG)──> [Camera Bridge] ──(HTTP/WS)──> [FastAPI Backend]
-ESP32-CAM / Webcam                        Python / LatestFrame           Python 3.12 / ASGI
+ESP32-CAM / Webcam / Điện thoại           Python / LatestFrame           Python 3.12 / ASGI
                                                                                  │
                ┌─────────────────────────────────────────────────────────────────┤
                ▼                                                                 ▼
       [Pipeline AI 4 chặng]                                            [Lưu trữ & Giao diện]
 YuNet ➔ Stability ➔ MiniFASNet ➔ dlib                            SQLite / WebSockets / React TS
+                                                                                 │
+                                                                                 │ (cloud_sync)
+                                                                                 ▼
+                                                                       [Tầng Cloud]
+                                                                  Google Sheets / Apps Script
 ```
 
 | Tầng hệ thống | Công nghệ sử dụng | Vai trò & Đặc điểm chính |
@@ -111,6 +121,11 @@ Các tham số được nạp từ file `.env`, định nghĩa tại `backend/ap
 | `LATE_AFTER_MINUTES` | `15` | Ngưỡng tính đi muộn (phút); có thể chỉnh động trực tiếp trên giao diện web. |
 | `STABLE_FRAMES` | `3` | Số khung hình ổn định liên tiếp trước khi nhận diện. Buổi demo đặt `1`. |
 | `FRAME_INTERVAL_SECONDS` | `0.3` | Khoảng cách tối thiểu giữa hai khung hình gửi vào mô hình AI. |
+| `CLOUD_SYNC_URL` | `""` | URL triển khai Web App dạng `/exec` của Google Apps Script. |
+| `CLOUD_SYNC_TOKEN` | `""` | Khóa bí mật khớp với biến `TOKEN` trong `Code.gs`. |
+| `CLOUD_SYNC_INTERVAL_SECONDS` | `15` | Chu kỳ chạy tác vụ đồng bộ nền tính bằng giây (5 đến 300 giây). |
+| `GATEWAY_ID` | `gateway-laptop-01` | Mã định danh gateway gửi kèm trong mỗi lần đồng bộ. |
+| `CLOUD_SYNC_BACKFILL` | `false` | Đồng bộ toàn bộ dữ liệu cũ từ ID 0 khi chưa có con trỏ. |
 
 Firmware chính nằm ở `firmware/esp32_cam/` (bắt hotspot, có Wi-Fi tự phát dự phòng). `firmware/esp32_cam_softap/` là bản chỉ tự phát Wi-Fi, giữ lại để dự phòng.
 
@@ -147,12 +162,13 @@ Chi tiết các biện pháp và hướng dẫn kiểm tra xem tại [docs/secur
 PYTHONPATH=backend pytest backend/tests -q
 ```
 
-215 passed; E2E 14/14 bước. Bộ test dùng CSDL tạm và không đọc `.env`, nên chạy được trên máy đang chứa dữ liệu thật. Chi tiết: [docs/test-report.md](docs/test-report.md).
+243 passed; E2E 14/14 bước (đo ngày 12/11/2026). Bộ test dùng CSDL tạm và không đọc `.env`, nên chạy được trên máy đang chứa dữ liệu thật. Chi tiết: [docs/test-report.md](docs/test-report.md).
 
 ## Tài liệu
 
 - [Báo cáo BTL (PDF)](docs/BaoCao_BTL_IoT_Nhom05.pdf)
 - [Kiến trúc](docs/architecture.md)
+- [Tầng cloud và cấp độ IoT](docs/cloud.md)
 - [ESP32-CAM SoftAP](docs/camera-softap.md)
 - [Docker](docs/docker.md)
 - [Đánh giá mô hình](docs/model-evaluation.md)

@@ -15,6 +15,7 @@ from app.api import (
     attendance,
     audit,
     auth,
+    cloud,
     devices,
     export,
     roster_io,
@@ -27,6 +28,7 @@ from app.api import (
 from app.core.config import ROOT_DIR, settings
 from app.core.middleware import install_security_headers
 from app.database import init_db
+from app.services import cloud_sync
 from app.services.auto_session import run_forever
 from app.services.bridge_control import bridge
 from app.services.face_recognition import prepare_encoder, shutdown_encoder
@@ -97,9 +99,18 @@ def create_app() -> FastAPI:
         task = None
         if settings.auto_session_enabled:
             task = asyncio.create_task(run_forever())
+        cloud_task = None
+        if settings.cloud_sync_url:
+            cloud_task = asyncio.create_task(cloud_sync.run_forever())
         try:
             yield
         finally:
+            if cloud_task:
+                cloud_task.cancel()
+                try:
+                    await cloud_task
+                except asyncio.CancelledError:
+                    pass
             if task:
                 task.cancel()
                 try:
@@ -137,6 +148,7 @@ def create_app() -> FastAPI:
     application.include_router(export.router, prefix="/api")
     application.include_router(audit.router, prefix="/api")
     application.include_router(settings_api.router, prefix="/api")
+    application.include_router(cloud.router, prefix="/api")
     application.include_router(websocket.router)
 
     @application.get("/health")
