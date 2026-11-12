@@ -87,4 +87,5 @@ Nếu mất kết nối mạng hoặc cloud báo lỗi, con trỏ giữ nguyên 
 - Hệ thống dùng chung một chuỗi token bí mật giữa gateway và cloud, chưa phân quyền chi tiết theo từng người dùng.
 - Khi giảng viên thay đổi ngưỡng thời gian đi muộn tại gateway, trạng thái các bản ghi cũ trên gateway được tính lại nhưng Google Sheets không cập nhật ngược lại các dòng đã ghi.
 - Nhóm hiện có một phần cứng ESP32-CAM nên nút camera thứ hai sử dụng ứng dụng camera IP trên điện thoại qua script `start_phone.sh`, hoặc dùng webcam laptop làm phương án dự phòng.
-- Thao tác mất mạng vật lý rồi bật lại trên máy thật và nhận lệnh điều khiển từ cloud chưa được thử nghiệm trên thiết bị thật, mới chỉ được xác thực thông qua bộ kiểm thử tự động.
+- Gửi bù sau khi mất mạng mới được kiểm bằng bộ kiểm thử tự động (máy chủ giả), chưa thử bằng cách ngắt mạng thật trên máy demo.
+- Chưa cài đặt việc gateway nhận lệnh từ cloud và chuyển xuống camera. Sheet Lenh và trường commands trong cloud/apps_script/Code.gs đã có sẵn cho bước sau, nhưng gateway hiện bỏ qua chúng.
