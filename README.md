@@ -18,7 +18,7 @@ Sinh viên đứng trước ESP32-CAM, hệ thống nhận ra khuôn mặt, lo�
 
 Số đo ngày 12/11/2026 trên máy demo (máy ảo 2 CPU), chi tiết ở [docs/test-report.md](docs/test-report.md):
 
-- 243 bài kiểm thử tự động đều đạt; kịch bản đầu-cuối 14/14 bước.
+- 243 bài kiểm thử tự động đều đạt.
 - Lưu một lịch đang trong giờ học, ca điểm danh mở sau khoảng 20 ms.
 - Trong lúc nhận diện, máy chủ vẫn trả lời dưới 30 ms ở 1096/1096 lần đo. Trước khi tách bước trích vector khuôn mặt sang tiến trình riêng, 17/923 lần bị trễ khoảng 75 ms.
 
@@ -162,7 +162,7 @@ Chi tiết các biện pháp và hướng dẫn kiểm tra xem tại [docs/secur
 PYTHONPATH=backend pytest backend/tests -q
 ```
 
-243 passed; E2E 14/14 bước (đo ngày 12/11/2026). Bộ test dùng CSDL tạm và không đọc `.env`, nên chạy được trên máy đang chứa dữ liệu thật. Chi tiết: [docs/test-report.md](docs/test-report.md).
+243 passed (đo ngày 12/11/2026). Bộ test dùng CSDL tạm và không đọc `.env`, nên chạy được trên máy đang chứa dữ liệu thật. Chi tiết: [docs/test-report.md](docs/test-report.md).
 
 ## Tài liệu
 
